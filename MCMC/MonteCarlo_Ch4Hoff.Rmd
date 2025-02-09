@@ -1,0 +1,308 @@
+---
+title: "The Monte Carlo method"
+output: html_notebook
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Ex. in Chapter 4 in Hoff (2009). A first course in Bayesian statistical methods. Springer
+
+The Monte Carlo method
+
+$\bf Y_1$ is the vector of the numbers of children of the $n_1$ women
+WITHOUT college degrees
+
+$\bf Y_2$ is the vector of the numbers of children of the $n_2$ women WITH
+college degrees
+
+We assume $\bf Y_1$ and $\bf Y_2$ conditionally to $(\theta_1,\theta_2$)
+independent and $$ 
+Y_{ij}|\theta_j \stackrel{iid}\sim Poi(\theta_j), i=1,\ldots,n_j, \quad j=1,2
+$$ A priori, the components of the two vectors are iid from Poisson with
+parameter theta_1 and theta_2, respectively $$
+\theta_1,\theta_2 \stackrel{iid}\sim gamma(\alpha,\beta)
+$$ with $E(\theta_j)=\alpha/\beta=2$ and
+$Var(\theta_j)=\alpha/\beta^2=2$ for $j=1,2$, so that $\alpha=2$,
+$\beta=1$
+
+The POSTERIOR of $(\theta_1,\theta_2)$:
+$$ gamma(\alpha+\sum_i y_{i1},\beta+n_1)\times gamma(\alpha+\sum_i y_{i2},\beta+n_2)=gamma(219,112)\times gamma(68,45)
+$$
+
+> NOTATION: MC standard error = sqrt(variance of the estimator of the
+> parameter of interest)
+
+Let us plot the marginal posterior of $\theta_2$ via the Monte Carlo
+method; we use 3 different groups of iid draws from the posterior of
+$\theta_2$
+
+```{r}
+
+set.seed(1)
+a<-68 ; b<-45
+set.seed(1)
+theta.support<-seq(0,3,length=100)
+## 3 different groups of iid draws from the posterior of theta_2
+theta.sim10<-rgamma(10,a,b)# iid sample of size M=10 from the gamma(a,b)
+theta.sim100<-rgamma(100,a,b) #size M=100
+theta.sim1000<-rgamma(1000,a,b) #size M=1000
+```
+
+Plot of the histogram and *kernel density estimate* for the 3 groups of
+iid draws
+
+```{r}
+#par(mar=c(3,3,.25,1),mgp=c(1.75,.75,0))
+par(mfrow=c(2,3))
+xlim<-c(.75,2.25)
+ylim=c(0,2.5)
+lty=1
+
+hist( theta.sim10, prob=T,xlim=xlim,ylim=ylim,xlab="",main="",ylab="")
+lines(theta.support,dgamma(theta.support,a,b),col="gray",lwd=2,lty=lty)
+text(2.1,2.25,expression(paste(italic(M),"=10",sep="")))
+
+hist( theta.sim100, prob=T,xlim=xlim,ylim=ylim,xlab="",main="" ,ylab="")
+lines(theta.support,dgamma(theta.support,a,b),col="gray",lwd=2,lty=lty)
+text(2.1,2.25,expression(paste(italic(M),"=100",sep="")))
+
+hist( theta.sim1000, prob=T,xlim=xlim,ylim=ylim,xlab="",main="" ,ylab="")
+lines(theta.support,dgamma(theta.support,a,b),col="gray",lwd=2,lty=lty)
+text(2.1,2.25,expression(paste(italic(M),"=1000",sep="")))
+
+
+plot(density(theta.sim10),xlim=xlim,ylim=ylim,xlab=expression(theta),main="",ylab="")
+lines(theta.support,dgamma(theta.support,a,b),col="gray",lwd=2,lty=lty)
+
+plot(density(theta.sim100),xlim=xlim,ylim=ylim,xlab=expression(theta),main="",ylab="")
+lines(theta.support,dgamma(theta.support,a,b),col="gray",lwd=2,lty=lty)
+
+plot(density(theta.sim1000),xlim=xlim,ylim=ylim,xlab=expression(theta),main="",ylab="")
+lines(theta.support,dgamma(theta.support,a,b),col="gray",lwd=2,lty=lty)
+
+```
+
+Note that the kernel density estimator, a smoothed version of the
+histogram, is obtained with the command "density"
+
+Monte Carlo computation of the posterior mean of $\theta_2$:
+$\theta_2 \sim gamma(\alpha+\sum_i y_{i2}=68, \beta+n_2=45)$
+
+```{r}
+set.seed(1)
+a<-2  ; b<-1
+sy<-66; n<-44
+
+theta.sim10<-rgamma(10,a+sy,b+n)
+theta.sim100<-rgamma(100,a+sy,b+n)
+theta.sim1000<-rgamma(1000,a+sy,b+n)
+
+```
+
+Posterior mean for $M=10,100,1000$
+
+$M=10$:
+
+```{r}
+#(a+sy)/(b+n)# exact value
+cat(sprintf("exact value of the posterior mean: %f\n", (a+sy)/(b+n)))
+
+mean(theta.sim10) # MC estimate and MC standard error for 10 draws
+sqrt(var(theta.sim10)/10)
+
+# Probability that the absolute value of the error is larger than c 
+c=0.01 
+2*(1-pnorm(c/(sqrt(var(theta.sim10)/10))))
+
+```
+
+$M=100$:
+
+```{r}
+mean(theta.sim100)  #  MC estimate and MC standard error for 100 draws
+sqrt(var(theta.sim100)/100)
+2*(1-pnorm(c/(sqrt(var(theta.sim100)/100))))
+
+```
+
+$M=1000$:
+
+```{r}
+mean(theta.sim1000)  #  MC estimate and MC standard error for 1000 draws
+sqrt(var(theta.sim1000)/1000)
+2*(1-pnorm(c/(sqrt(var(theta.sim1000)/1000))))
+```
+
+MC computation of the posterior distribution function at 1.75
+
+```{r}
+pgamma(1.75,a+sy,b+n) #exact value
+```
+
+The MC estimate is the relative frequency of the simulated draws that
+are smaller than 1.75
+
+```{r}
+mean( theta.sim10<1.75)   # I'm using 10 MC draws 
+mean( theta.sim100<1.75)  # 100 draws
+mean( theta.sim1000<1.75) # 1000 draws
+
+```
+
+Posterior 95% credible interval, given by two symmetric quantiles
+
+```{r}
+qgamma(c(.025,.975),a+sy,b+n)
+quantile( theta.sim10, c(.025,.975))
+quantile( theta.sim100, c(.025,.975))
+quantile( theta.sim1000, c(.025,.975))
+
+```
+
+Monte Carlo approximations as the sample size increases
+
+```{r}
+par(mfrow=c(1,3),mar=c(2.75,2.75,.5,.5),mgp=c(1.70,.70,0))
+
+set.seed(1)
+a<-2   ; b<-1
+sy<-66 ; n<-44
+
+nsim<-1000
+theta.sim<-rgamma(nsim,a+sy,b+n)
+
+#cumulative mean
+#?cumsum
+cmean<-cumsum(theta.sim)/(1:nsim)
+cvar<- cumsum(theta.sim^2)/(1:nsim) - cmean^2
+ccdf<- cumsum(theta.sim<1.75)/ (1:nsim)
+cq<-NULL
+for(j in 1:nsim){ cq<-c(cq,quantile(theta.sim[1:j],probs=0.975)) }
+
+sseq<- c(1,(1:100)*(nsim/100))
+cmean<-cmean[sseq] 
+cq<-cq[sseq] 
+ccdf<-ccdf[sseq] 
+
+```
+
+Plots ofthe MC estimates of the mean, the df at 1.75, the CI as the
+sample size M increases
+
+REMARK: there is no monotonicity!
+
+```{r}
+par(mfrow=c(1,3),mar=c(2.75,2.75,.5,.5),mgp=c(1.70,.70,0))
+plot(sseq,cmean,type="l",xlab="# of Monte Carlo samples",ylab="cumulative mean",
+     col="black")
+abline(h= (a+sy)/(b+n),col="gray",lwd=2)
+
+plot(sseq,ccdf,type="l",xlab="# of Monte Carlo samples",ylab="cumulative cdf at 1.75",col="black")
+abline(h= pgamma(1.75,a+sy,b+n),col="gray",lwd=2)
+
+plot(sseq,cq,type="l",xlab="# of Monte Carlo samples",ylab="cumulative 97.5% quantile",col="black")
+abline(h= qgamma(.975,a+sy,b+n),col="gray",lwd=2)
+
+```
+
+> MC computation of the posterior probability that $\theta_1>\theta_2$
+
+```{r}
+set.seed(1)
+a<-2 ; b<-1
+sy1<-217 ;  n1<-111
+sy2<-66  ;  n2<-44
+
+a+sy1; b+n1
+a+sy2; b+n2
+```
+
+MC sample of size $M=10000$ from the joint posterior
+
+```{r}
+theta1.mc<-rgamma(10000,a+sy1, b+n1)
+theta2.mc<-rgamma(10000,a+sy2, b+n2)
+```
+
+The probability is estimated by the number of times in the sequence
+$\{(\theta_1^{(j)},\theta_2^{(j)}),\ j=1,2,...,M\}$ the first component
+is $>$ than the second, divided by the total number of simulations $M$
+
+```{r}
+mean(theta1.mc>theta2.mc) # this prop is equal to the prob that theta1  is larger or EQUAL to theta2, since (theta1,theta2)  has an ABSOL CONT posterior distr 
+
+```
+
+As an alternative, I can compute the posterior distribution of
+theta1/theta2.
+
+```{r}
+par(mar=c(3,3,1,1),mgp=c(1.75,.75,0))
+par(mfrow=c(1,1))
+plot(density(theta1.mc/theta2.mc,adj=2),main="",xlim=c(.75,2.25),
+xlab=expression(gamma==theta[1]/theta[2]),
+ylab=expression(paste(italic("p("),gamma,"|",bold(y[1]),",",bold(y[2]),")",
+   sep="")) )
+```
+
+> COMPUTATION of PREDICTIVE DISTRIBUTIONS
+
+theta1.mc is a vector of size 10thousand from the posterior distribution
+of $\theta_1$
+
+```{r}
+y1.mc<-rpois(10000,theta1.mc) #simulate ALL AT ONCE 10K independent (but **not identically distributed**) values from Pois($\theta1_j$), $j=1,\ldots,10K$
+y2.mc<-rpois(10000,theta2.mc)
+
+mean(y1.mc>y2.mc)  #it is about 0.48
+
+mean(y1.mc==y2.mc)  # it's about 0.21 ; 
+                    #### hence the posterior predictive prob. that Y_1 is larger or equal to Y_2 is 0.69
+
+mean(y1.mc<y2.mc)   #around 0.3
+```
+
+Predictive of $Y_{n_1+1, 1}-Y_{n_2+1, 2}$:
+
+```{r}
+par(mar=c(3,3,1,1),mgp=c(1.75,.75,0))
+
+diff.mc<-y1.mc-y2.mc
+
+ds<- -11:11
+plot(ds,(table(c(diff.mc,ds))-1)/length(diff), type="h",lwd=3,
+    xlab=expression(italic(D==tilde(Y)[1]-tilde(Y)[2])),
+  ylab=expression(paste(italic("p(D"),"|",bold(y[1]),",",bold(y[2]),")",sep="")))
+```
+
+> MC marginal posteriors of $\theta_1$ and $\theta_2$:
+
+```{r}
+par(mfrow=c(1,2))
+plot(theta1.mc,theta2.mc)
+plot(density(theta1.mc),xlim=c(0.5,3.5), ylim=c(0,4),lwd=2,main='posteriors of theta1 e theta2' )
+lines(density(theta2.mc),main="",xlim=c(0.5,3.5),   lwd=2, col=2)
+legend(1,4.5,legend=c(
+    expression(paste(theta,"1",sep="")), 
+    expression(paste(theta,"2",sep="")) ),
+     lwd=c(2,2), 
+    col=c('black','red') ,bty="n") 
+```
+
+In this case we know the exact marginal posterior predictive
+disbributions - negative binomial:
+
+```{r}
+par(mfrow=c(1,2))
+a+sy1; (b+n1)/(1+b+n1)  #hypeparameters of the exact marginal posterior predictive of Y_1
+a+sy2; (b+n2)/(1+b+n2)  #hypeparameters of the exact marginal posterior predictive of Y_2
+
+
+ds=seq(0,10)
+plot(ds,dnbinom(ds,a+sy1, (b+n1)/(1+b+n1)), type="h",lwd=3,xlab='y', ylab='PredMargY_1',ylim=c(0,0.35))
+plot(ds,dnbinom(ds,a+sy2, (b+n2)/(1+b+n2)), type="h",lwd=3,xlab='y', ylab='PredMargY_1',ylim=c(0,0.35))
+
+```
+rmarkdown::render("your_file.Rmd", output_format = "html_document")
+

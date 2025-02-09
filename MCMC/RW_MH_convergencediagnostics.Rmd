@@ -1,0 +1,498 @@
+---
+title: "RWMH algorithm and convergence diagnostics"
+output: html_notebook
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+
+------------------------------------------------------------------------
+
+### **EXAMPLE 2 - Ex in 6.7 in Albert (2009)**
+
+Data are heights (in inches) of male students from a local college
+
+The interest is in making inference about the mean and sd of the
+heights; $Y_i \sim {\mathcal N}(\mu,\sigma^2)$ iid
+
+1 inch= 2.54 cm
+
+However data are grouped: out of $n=211$ men, $n_1=14$ of them have
+height less than 66, $n_2=30$ have height between 66 and 68, ect.
+
+Heights:$<66$, $[66, 68)$, $[68, 70)$, $[70, 72)$, $[70, 72)$,
+$[72, 74)$, $\geq 74$
+
+Frequency: $n_1=14$, $n_2=30$, $n_3=49$, $n_4=70$, $n_5=33$, $n_6=15$
+
+d is a list defining the intervals and the frequencies
+
+
+
+```{r}
+rm(list=ls())
+library(LearnBayes)
+
+d=list(int.lo=c(-Inf,seq(66,74,by=2)),int.hi=c(seq(66,74,by=2), Inf),f=c(14,30,49,70,33,15))
+d
+install.packages("coda")
+
+```
+
+help(groupeddatapost)
+
+it computes the log posterior density of $(\mu,\log \sigma)$ for this
+model, i.e., for normal sampling where the data is observed in grouped
+form
+
+> We assume an **IMPROPER prior** for $(\mu,\log(\sigma))$, but only
+> because Jim Albert does:
+> $\pi(\mu,\lambda:=\log(\sigma)) \propto const$ for any $\mu,\lambda$
+> both in $\mathbb R$ - NEVER assume an improper prior with real data
+
+> **Likelihood** $L(\mu,\sigma;n_1,\ldots,n_6)$: multinomial, with the
+> parameters $(p_1,\ldots,p_6)$, and $p_i$ is the mass assigned by
+> ${\mathcal N}(\mu,\sigma^2)$ to the $i$-th class
+
+> **posterior**:
+> $\pi(\mu,\lambda|n_1,\ldots,n_6)\propto L(\mu,e^{\lambda};n_1,\ldots,n_6)$
+
+help(groupeddatapost)
+
+INPUT: $\theta$=values of $\mu$ and $\log(\sigma)$ where we compute the
+log-posterior data= dataframe dei dati in forma raggruppata
+
+OUTPUT: log-posterior density
+
+help(laplace)
+
+It is an iterative method (Newton's method) to compute, for a general
+posterior density, an estimate of the posterior mode and the associated
+variance-covariance matrix
+
+INPUT: the log-posterior density, the initial point of the iterative
+method parameters of the log-posterior density (the vector d in this
+case)
+
+```{r}
+start=c(70,1) #starting point 
+
+fit=laplace(groupeddatapost,start,d)
+
+fit
+```
+
+fit\$var is the matrix $(\tilde I_n)^{-1}$, where $\tilde I_n$ is the
+"generalized observed Fisher information matrix"\
+(-d\^2/ d d log(pi(mu,log(sigma)\|x)) #d is here the DERIVATIVE
+
+```{r}
+diag(fit$var)
+modal.sds=sqrt(diag(fit$var))
+```
+
+Approximately the marginal posterior density of mu is N(70.17,0.035) and
+the marginal posterior density of lambda=log(sigma) is N(0.974, 0.003)
+
+#### METROPOLIS-HASTINGS ALGORITHM
+
+Build the MC according to a RANDOM WALK Metropolis algorithm: the
+bivariate proposal density $q$ is $\mathcal N$(val_prec,$c^2 V$) where
+the scale factor $c=2$, $V$ is the covariance matrix
+$(\tilde I_n)^{-1}$; this is the covariance of the Gaussian
+approximation
+
+**The PROPOSAL distribution has to be close to the true posterior, i.e.
+it should be an approximation of the posterior!!!**
+
+**The scale factor** $c$ determines the behaviour of the MC
+
+> $c=2$
+
+```{r}
+proposal=list(var=fit$var,scale=2) #c=2, 0.1, 10
+proposal
+```
+
+Proposal distributions: \* ${\mathcal N}_2(0,\Sigma)$, \* Uniform on the
+ball of radius R, \* t-Student (or more general mixtures of normals)
+
+usually, variance matrix of the Gaussian proposal is $c^2 \cdot$ inverse
+of the "generalized observed Fisher information" matrix for c \>0;
+
+here $c =1/2, 1, 2$ work "well"
+
+The function/command of LearnBayes package is rwmetrop
+
+It simulates iterates of a random walk Metropolis chain for an arbitrary
+real-valued posterior density defined by the user
+
+help(rwmetrop)
+
+print(rwmetrop)
+
+INPUT: log-posterior = groupeddatapost proposal = N(0,c\^2\*V) start=
+initial point of the MC number of iterations=10000 d=parametri della
+log-posterior = Hyperparameters + data
+
+the acceptance probability $\alpha(x,y)$ is the ratio of the posterior
+densities (random walk MH)
+
+```{r}
+fit2=rwmetrop(groupeddatapost,proposal,start,10000,d)
+```
+
+OUTPUT :
+
+par = a matrix of simulated values where each row corresponds to a
+simulated value of the vector parameter
+
+accept= the acceptance rate of the algorithm
+
+```{r}
+#fit2
+fit2$accept
+```
+
+> Is the acceptance rate good?
+
+The proposal should be more "diffuse" than posterior density in order to
+explore the whole support of the posterior density.
+
+If $c$ is too small, the acceptance rate will be high; basically, a
+small scale $c$ means that I'm sampling the candidate point $y$ from a
+density with small variance, so that $y$ will be close to $x$, and
+therefore $\alpha(x,y)=\frac{\pi(y)}{\pi(x)}$ will assume values close
+to 1.
+
+This means that the MC explores the state space weakly, i.e. the MC
+moves slowly through the state space, and the algorithm can turn out to
+be inefficient.
+
+On the other hand, if $c$ is too large, $\alpha(x,y)$ will often be
+small, and many candidate points will be rejected, so that the overall
+acceptance rate $r$ will be too small, and also in this case the
+algorithm is inefficient.
+
+A "good" acceptance rate for RW-MH shold be in $[0.2, 0.5)$ for
+dimension =1,2,3
+
+For a random walk MH, remember that $\alpha(x,y)=\frac{\pi(y)}{\pi(x)}$
+indicates how probable the new proposed sample $y$ is with respect to
+the current sample $x$.
+
+If we attempt to move to a point that is more probable than the existing
+point (i.e. a point in a higher-density region of $\pi$), we will always
+accept the move. However, if we attempt to move to a less probable
+point, we will sometimes reject the move, and the more the relative drop
+in probability, the more likely we are to reject the new point.
+
+For **independence chain Metropolis**, rates of acceptance that lead to
+efficient algorithms have to be higher; theoretically, the higher the
+ratio of acceptance, the better the convergence rate of this chain.
+
+Let's go back to posterior inference:
+
+Posterior means and standard deviations (i.e. ergodic means) of $\mu$
+and $\log(\sigma)$:
+
+```{r}
+post.means=apply(fit2$par,2,mean)
+post.sds=apply(fit2$par,2,sd)
+post.means
+post.sds
+```
+
+Comparison between ergodic means and standard deviations and those from
+the Gaussian approximation of the posterior
+
+```{r}
+cbind(c(fit$mode),modal.sds)
+cbind(post.means,post.sds)
+```
+
+In this case the approximation is very good
+
+Draw a countour plot of the true posterior (which is known beyond the
+normalizing constant) with the MC points (from 5001-th on)
+
+```{r}
+mycontour(groupeddatapost,c(69,71,.6,1.3),d)
+points(fit2$par[5001:10000,1],fit2$par[5001:10000,2])
+```
+
+Marginal traceplots
+
+```{r}
+par(mfrow=c(1,2))
+plot(ts(fit2$par[5001:10000,1]),ylab="mu")
+plot(ts(fit2$par[5001:10000,2]),ylab="sigma")
+```
+
+------------------------------------------------------------------------
+
+> $c=0.1$
+
+```{r}
+proposal=list(var=fit$var,scale=0.1) 
+proposal
+
+fit2=rwmetrop(groupeddatapost,proposal,start,10000,d)
+fit2$accept
+```
+
+```{r}
+post.means=apply(fit2$par,2,mean)
+post.sds=apply(fit2$par,2,sd)
+post.means
+post.sds
+cbind(c(fit$mode),modal.sds)
+cbind(post.means,post.sds)
+```
+
+```{r}
+mycontour(groupeddatapost,c(69,71,.6,1.3),d)
+points(fit2$par[5001:10000,1],fit2$par[5001:10000,2])
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(ts(fit2$par[5001:10000,1]),ylab="mu")
+plot(ts(fit2$par[5001:10000,2]),ylab="sigma")
+```
+
+------------------------------------------------------------------------
+
+> $c=10$
+
+```{r}
+proposal=list(var=fit$var,scale=10) 
+proposal
+
+fit2=rwmetrop(groupeddatapost,proposal,start,10000,d)
+fit2$accept
+```
+
+```{r}
+post.means=apply(fit2$par,2,mean)
+post.sds=apply(fit2$par,2,sd)
+post.means
+post.sds
+cbind(c(fit$mode),modal.sds)
+cbind(post.means,post.sds)
+```
+
+```{r}
+mycontour(groupeddatapost,c(69,71,.6,1.3),d)
+points(fit2$par[5001:10000,1],fit2$par[5001:10000,2])
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(ts(fit2$par[5001:10000,1]),ylab="mu")
+plot(ts(fit2$par[5001:10000,2]),ylab="sigma")
+```
+
+------------------------------------------------------------------------
+
+#### MONITORING the CONVERGENCE of the MC to the STATIONARY distribution
+
+If we simulate realizations from a MC, then under 'broad' conditions,
+**EVENTUALLY** the simulated values will be marginally distributed
+according to the invariant distr. (the posterior) and the ergodic means
+will converge to correspondent integrals of the invariant distribution.
+
+However, initial points of the MC, if included in the computation of the
+ergodic mean, may influence the value of the ergodic mean itself,
+yielding a poor approximation.
+
+For this reason we usually discard the first non-stationary portion of
+the chain, called **BURN-IN**.
+
+> Therefore we need to be able to detect when the marginal behaviour of
+> the MC is sufficiently close to stationarity, and harvest all
+> subsequent realizations as a **dependent** sample from the stationary
+> distribution.
+
+We **diagnose convergence retrospectly**, by guessing for how long to
+run the simulation and then trying to determinate if some latter portion
+of the chain can be considered stationary.
+
+The sample size required depends on the EFFICIENCY of the MC; moreover
+this sample size increases with an increasing level of serial dependence
+of the chain (autocorrelation of the MC).
+
+```{r}
+rm(list = ls())
+library(LearnBayes)
+d=list(int.lo=c(-Inf,seq(66,74,by=2)),
+        int.hi=c(seq(66,74,by=2), Inf),
+        f=c(14,30,49,70,33,15))
+
+library(coda)
+library(lattice)
+```
+
+```{r}
+start=c(70,1)
+fit=laplace(groupeddatapost,start,d)
+```
+
+Let us choose an UNLUCKY initial point for the chain, and a small scale
+factor for the proposal c=0.2; the MC will move slowly through the state
+space since candidate y will be close to current x
+
+```{r}
+start=c(65,1)
+proposal=list(var=fit$var,scale=0.2)
+bayesfit=rwmetrop(groupeddatapost,proposal,start,10000,d)
+
+bayesfit$accept
+apply(bayesfit$par,2,mean)
+apply(bayesfit$par,2,sd)
+```
+
+```{r}
+
+dimnames(bayesfit$par)[[2]]=c("mu","log sigma") #assign the names to the columns of                                                                   bayesfit$par
+
+?mcmc
+
+```
+
+the key instruction in coda is "mcmc"
+
+See more details on R package CODA below!!
+
+```{r}
+plot(ts(mcmc(bayesfit$par)))
+xyplot(mcmc(bayesfit$par),col="black") # "fancier" plot than above 
+# "mcmc" (from coda) is used to create a Markov Chain Monte Carlo object
+```
+
+**BURN-IN**: about 600 iterations
+
+```{r}
+plot(ts(mcmc(bayesfit$par[1:1000,])))
+```
+
+"Safer" if we get rid of the first 2000 iterations
+
+```{r}
+plot(ts(mcmc(bayesfit$par[-c(1:2000),])))
+```
+
+It is clear that after the first 2000 iterations, the chain has reached
+convergence (or stationarity)
+
+A 'good ' traceplot is a fat hairy caterpillar !
+
+However, a 'snake-like' caterpillar does NOT mean in general that the MC
+hasn't reached convergence, but ONLY that we need to increase the sample
+size because there is high correlation, in order to control the MC
+standard error
+
+For a given sample size, the ACCURACY of our inferences is dependent on
+the EFFICIENCY of our posterior samples.
+
+We'll see that the efficiency decreases with an increasing level of
+AUTOCORRELATION.
+
+      
+**AUTOCORRELATION plots** between X_n and X\_{n+k} by CODA
+
+```{r}
+par(mfrow=c(2,1))
+autocorr.plot(mcmc(bayesfit$par[-c(1:2000),]),auto.layout=TRUE)
+
+
+```
+
+From the HELP of the function "autocorr": High autocorrelations within
+chains indicate slow mixing (the support of the target distribution has
+not been fully explored yet) and, usually, slow convergence. It may be
+useful to thin out a chain with high autocorrelations before calculating
+summary statistics: a thinned chain may contain most of the information,
+but take up less space in memory. Re-running the MCMC sampler with a
+different parameterization may help to reduce autocorrelation
+
+```{r}
+summary(mcmc(bayesfit$par[-c(1:2000),]))
+```
+
+We estimate the (square root of the) variance of the MCMC estimator,
+that is sigma\^2_h / T via batch means:
+
+```{r}
+batchSE(mcmc(bayesfit$par[-c(1:2000),]), batchSize=50)
+```
+
+**OR via Time-series SE in the command "summary" (see above)** -
+they are different estimates
+
+```{r}
+effectiveSize(mcmc(bayesfit$par[-c(1:2000),])) #8000 total number of iterations 
+```
+
+In order to check the convergence of the MC:
+
+-   analysis of the traceplots (also to understand which burn-in we
+    should consider) 
+-   MCerror/posterior sd has to be small (less than 0.1 o 1 o 5%)
+-   convergence diagnostics (in coda)
+
+In order to check the mixing of the chain:  
+* autocorrelation plots: the autocorrelation should be 'small' as the lag increases. In fact, if there is a strong dependence between X_n and X_{n+k}, this means that the value of X_{n+k} strongly depends on the previous value X_n, and therefore the chain does not mix 'well', since the chain would be bound to stay in some region  of the support set, and not 'covering' the whole support of the target distribution. 
+
+Slow mixing usually denotes a 'slow' convergence:    
+
+* one solution is to reparametrize the parameters in order to reduce autocorrelation. 
+* the other solution (more popular!) is to perform a process known as THINNING whereby only every kth value from the MC is actually stored for inference, so that autocorrelation among successive value of the chain is diminished. 
+
+Note that this only represents an efficiency gain in terms of storing and post-processing  the sample: for the same computational cost of simulation, the full sample size will always contain more information.
+
+Two more remarks: 
+
+1. The total number of iterations to store (and use for computing the ergodic means)should be typically evaluated based on the MCse we control 
+ 
+2. Effective Sample Size (ESS) of a unidimensional target: the higher the better  
+
+***
+Let us run the RWMH again, from a "better" starting point and a "better" "scale"  of the proposal density
+```{r}
+
+start=c(70,1)
+proposal=list(var=fit$var,scale=2.0)
+bayesfit2=rwmetrop(groupeddatapost,proposal,start,10000,d)
+
+bayesfit2$accept
+apply(bayesfit2$par,2,mean)
+apply(bayesfit2$par,2,sd)
+```
+```{r}
+dimnames(bayesfit2$par)[[2]]=c("mu","log sigma")
+plot(ts(mcmc(bayesfit2$par)))
+```
+```{r}
+plot(ts(mcmc(bayesfit2$par[1:30,])))
+
+```
+```{r}
+sim.parameters=mcmc(bayesfit2$par[-c(1:2000),])
+#xyplot(mcmc(bayesfit2$par[-c(1:2000),]),col="black")
+plot(ts(mcmc(bayesfit2$par[-c(1:2000),])))
+```
+```{r}
+par(mfrow=c(2,1))
+autocorr.plot(sim.parameters,auto.layout=TRUE)
+
+```
+
+```{r}
+summary(sim.parameters)
+## The naive standard error is the standard error of the mean,
+##which captures simulation error of the mean
+batchSE(sim.parameters, batchSize=50)
+```
+

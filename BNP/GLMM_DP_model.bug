@@ -1,0 +1,63 @@
+# MODEL    
+  
+model{
+	# Precision Parameter 		
+	#alpha ~ <- 1;
+        a ~ dexp(1) ;
+	alpha <- a + 0.5 ;  #Shifted Exp with support (0.5, +infinity) (otherwise numerical issues)
+
+	# Constructive DP
+	pp[1] <- r[1];
+	for (j in 2:M) {
+		pp[j] <- r[j] * (1 - r[j - 1]) * pp[j -1 ] / r[j - 1]; # pesi della serie
+	}
+	p.sum <- sum(pp[]);	
+
+	for (j in 1:M){     
+		theta[j] ~ dnorm(mu.bb,tau.bb);   # locations della serie
+            r[j] ~ dbeta(1, alpha);		
+	# scaling to ensure sum to 1 
+		pi[j] <- pp[j] / p.sum ;		
+	}
+
+	mu.bb ~ dnorm(0, 0.01);    # mean of the baseline P_0 #mu.bb <- 0 
+	tau.bb ~ dgamma(30,0.1) 
+	#tau.bb <- pow(lambda.bb,-2);   #precision of the baseline P_0
+	#lambda.bb ~ dunif(0,50);           # dev std
+	
+	for(i in 1:J){    
+		S[i] ~ dcat(pi[]);     # smapling from the categorical distribution (i.e. from the mixture) 
+		bb[i] <- theta[S[i]];  # associated locations, i.e. support point
+		
+		for (j in 1 : M) {
+				SC[i, j] <- equals(j, S[i]); # SC = 1 if the i-th observation has been allocated to component j 
+			}
+		
+	}
+
+# likelihood
+	for(i in 1:n){
+		logit(p[i]) <- beta[1]*AGE[i] + beta[2]*LOGOB[i]+ beta[3]*KILLIP[i] + bb[CENTRO[i]];
+		Y[i] ~ dbern(p[i]);
+		}
+# Prior for the fixed effects 	      
+	for(i in 1:3){
+		mu[i] <- 0;
+		beta[i] ~ dnorm(mu[i], 0.001);
+	}
+
+
+	# New random CENTRO
+	
+	Snew ~ dcat(pi[]);
+	newcentro <- theta[Snew];
+
+
+	# posterior of total number of clusters			
+	K <- sum(cl[])
+	for (j in 1 : M) {
+		sumSC[j] <- sum(SC[ , j])
+		cl[j] <- step(sumSC[j] -1)
+	}
+		
+}

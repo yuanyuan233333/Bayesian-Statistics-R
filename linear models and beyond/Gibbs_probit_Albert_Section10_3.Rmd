@@ -1,0 +1,264 @@
+---
+title: "Gibbs sampler for the probit model in Section 10.3 in Albert's book"
+output: html_notebook
+---
+### Sampling from a TRUNCATED distribution
+
+This is the same variable as conditioningthe r.v. to belong to an interval (strictly contained in the original support)
+
+
+We simulate iid draws from the Gaussian r.v. X with parameters mu=1, sigma=1 but **TRUNCATED/RESTRICTED** in $A=(a_1,a_2)=(0,+\infty)$, 
+that is the law of $X$, but conditioning $X$ to assume values in $A$
+ 
+
+```{r}
+rm(list=ls())
+set.seed(3)
+mu=1
+sigma=1
+
+Fa1 <- pnorm(0,mu,sigma)
+Fa2 <- 1
+u1 <- runif(2000)
+u1 <- u1*(Fa2-Fa1)+Fa1
+ 
+x=qnorm(p=u1,mu,sigma)#qnorm is the inverse function of the Gaussian d.f.
+```
+
+```{r}
+hist(x,freq=F,col="red")
+curve( dnorm(x,mu,sigma)/(1-pnorm(0,mu,sigma)),from=0,to=6,col="blue",add=T,lwd=3)
+```
+
+### Example 10.3 from J. Albert's book "Bayesian computations with R".
+### GLMs for binary data: a regression model with PROBIT link 
+
+
+Data from DONNER party, a group of 'pioneers' who crossed Sierra Nevada, in a wagon train (in carovana) in 1846-47. Most pioneers starved to death.
+
+Binary response representing death/survival. 
+```{r}
+library(LearnBayes)
+
+data(donner)
+attach(donner)
+names(donner)
+age
+male
+survival
+```
+Response = survival: 0-> dead, 1-> alive
+
+$p_i$ = survival probability 
+
+COVARIATES:        
+* age (min age: 15 years)    
+* male: 0-> female, 1-> male
+
+Design matrix (with "1" for the intercept)
+```{r}
+X=cbind(1,age,male)
+```
+
+We first analyze this dataset via a GLM with PROBIT link, with  n=45
+```{r}
+fit=glm(survival~X-1,family=binomial(link=probit)) #we drop out the intercept, since it is already included in X
+# Equivalently: glm(survival ~ male + age,family=binomial(link = probit)) 
+summary(fit) # frequentist MLE of the parameters in the GLM
+```
+#### Proper priors and model selection
+
+PRIOR of beta: $N_p$ with mean=beta00 and PRECISION matrix $P0$
+
+We fix the prior mean equal to $\bf 0$ and the prior covariance matrix $c_0(X^T X)^{-1}$
+```{r}
+beta00=c(0,0,0); c0=100 #prior weight is 1% wrt data weight
+## HOMEWORK: c0=1 e c0=10
+P0=t(X)%*%X/c0
+```
+
+```{r}
+inv=function(X)
+{
+# RETURN THE INVERSE OF THE SYMMETRIC MATRIX X
+EV=eigen(X)
+EV$vector%*%diag(1/EV$values)%*%t(EV$vector)
+}
+B0=inv(P0)
+B0    #B0= c0*(t(X)%*%X)^{-1}
+```
+
+We fit this model to the data using the function *bayes.probit* of the package. 
+
+You can print and check that the function implements the Gibbs sampler we have described
+
+```{r}
+print(bayes.probit)
+```
+
+The full conditional of the beta is the  posterior of a Gaussian linear model when data are the latent variables $Z_i$'s
+
+The output of *bayes.probit* is *beta*, the matrix of simulated draws of regression parameters where each row corresponds to one draw and *log.marg*, the simulation estimate at log marginal likelihood of the model
+
+```{r}
+m=10000 #number of iterations to run
+fitBayes=bayes.probit(survival,X,m,list(beta=beta00,P=P0)) 
+head(fitBayes$beta)
+
+fitBayes$log.marg
+```
+Posterior mean and standard deviations of the regression coefficients via the MCMC, with comparison with frequentist estimates
+```{r}
+apply(fitBayes$beta,2,mean)
+fit$coefficients
+```
+
+
+```{r}
+apply(fitBayes$beta,2,sd)
+```
+Plots of the marginal posteriors of the regression parameters
+
+
+```{r}
+par(mfrow=c(1,3))
+plot(density(fitBayes$beta[,1]), xlab='beta0 - intercept',main=' ') 
+plot(density(fitBayes$beta[,2]), xlab='beta1 - age',main=' ') 
+plot(density(fitBayes$beta[,3]), xlab='beta2 - male',main=' ') 
+```
+
+```{r}
+mean(fitBayes$beta[,2]<0)
+mean(fitBayes$beta[,3]<0)
+```
+
+Both beta1 and beta2 are significative, and in both cases the 
+ marginal posterior is concentrated on negative values.
+ 
+> Survival probability decreases as age increases and it is smaller for men than for women.
+
+##### Survival probability, given AGE and MALE values, is 
+$\Phi(\beta_0+\beta_1*age+\beta_2*male)$, i.e. it is a function of the betas
+
+Let us compute its posterior distribution  for a man (male=1), as age varies.
+
+```{r}
+a=seq(15,65) #all integers from 15 to 65
+X1=cbind(1,a,1)
+```
+
+The posterior draws of $\Phi(\beta_0+\beta_1*age+\beta_2)$, for age in the grid *a*, is computed by the following function of the LearnBayes package:
+```{r}
+p.male=bprobit.probs(X1,fitBayes$beta)
+```
+
+We plot, for each value of age in the grid *a*, the posterior median and quantiles (0.05 and 0.95), i.e. 90% CI of the posterior of this function of betas for any fixed *age*
+```{r}
+par(mfrow=c(1,1))
+plot(a,apply(p.male,2,quantile,.5),type="l",ylim=c(0,1), xlab="age",ylab="Probability of Survival")
+lines(a,apply(p.male,2,quantile,.05),lty=2)
+lines(a,apply(p.male,2,quantile,.95),lty=2)
+lines(a,apply(p.male,2,mean),lty=3,col='red') #this is the posterior predictive probability that Y_i^new (male) at all ages would have survived
+```
+##### Model choice - we compute the log of the marginal density of the data for 4 different models and make 2-by-2 comparisons. 
+
+Choose the model corresponding to the highest marginal. 
+
+This is not an *optimal criterion* for more than 2 models like in this case
+
+```{r}
+y=donner$survival
+X=cbind(1,donner$age,donner$male)
+```
+
+We compute again the posteriors for the new models:
+
+Model 1: include all covariates (including the intercept) (the original model) 
+```{r}
+bayes.probit(y,X,1000,list(beta=beta00,P=P0))$log.marg
+```
+Model 2: include only the intercept and  *male*
+```{r}
+bayes.probit(y,X[,-2],1000,
+   list(beta=beta00[-2],P=P0[-2,-2]))$log.marg
+```
+Model 3: include only the intercept and  *age*
+```{r}
+bayes.probit(y,X[,-3],1000,
+   list(beta=beta00[-3],P=P0[-3,-3]))$log.marg
+```
+Modello 4: the intercept only
+```{r}
+bayes.probit(y,X[,-c(2,3)],1000,
+   list(beta=beta00[-c(2,3)],P=P0[-c(2,3),-c(2,3)]))$log.marg
+```
+> Model 1 is the best according to this criterion 
+
+***
+
+### Packages for Bayesian GLMs or linear models: 
+
+* brms: https://cran.r-project.org/web/packages/brms/index.html, see also https://paul-buerkner.github.io/brms/ 
+
+* MCMCpack: https://cran.r-project.org/web/packages/MCMCpack/index.html, paper on JStatSoft http://www.jstatsoft.org/article/view/v042i09
+
+
+**However, I expect you to use these packages only in a preliminary phase of the Bayesian workflow**
+
+```{r}
+library(MCMCpack)
+?MCMCprobit
+?MCMClogit
+
+
+```
+
+MODELS implemented in the package: linear regression (with Gaussian errors), a hierarchical longitudinal model with Gaussian errors, a probit model, a logistic regression model, a one-dimensional item response theory model, a K-dimensional item response theory model, a normal theory factor analysis model, a mixed response factor analysis model, an ordinal factor analysis model, a Poisson regression, a tobit regression, a multinomial logit model, a dynamic ecological inference model, a hierarchial ecological inference model, and an ordered probit model.
+
+```{r}
+
+library(LearnBayes)
+data(donner)
+y=donner$survival
+X=cbind(1,donner$age,donner$male)
+```
+
+Input: response vector, covariate (design) matrix and number of simulations to run
+
+Output: MCMC sample forom the posterior distribution of beta 
+
+The fitted prior is Gaussian, $\beta ~ N_p(b0,B0^{-1})$
+
+> B0 HERE is the PRECISION matrix in the prior
+
+Here we fix the hyperpar of the Gaussian prior for beta as in the Zellner g prior: $\beta \sim$ Gaussian with mean  beta00 and covariance matrix  $c(X^T X)^{-1}$
+
+```{r}
+beta00=c(0,0,0); c0=100 #la prior ha un peso dell'1% rispetto al campione
+## HOMEWORK:  c0=1 e c0=10
+P0=t(X)%*%X/c0
+P0
+
+bfit <- MCMCprobit(y ~ donner$age +as.factor(donner$male), b0=beta00, B0=P0,marginal.likelihood="Chib95")
+ # CAREFUL: here the input B0 must be the PRECISION matrix for beta
+
+bfitout<-as.matrix(bfit)
+```
+
+```{r}
+apply(bfitout,2,mean)
+apply(bfitout,2,sd)
+```
+```{r}
+par(mfrow=c(1,3))
+plot(density(bfitout[,1]), xlab='beta0 - intercept',main=' ') 
+plot(density(bfitout[,2]), xlab='beta1 - age',main=' ') 
+plot(density(bfitout[,3]), xlab='beta2 - male',main=' ') 
+```
+ 
+##### ## HOMEWORK: 
+* fit the logit model to this dataset using MCMCpack
+* fit both the Bayesian probit and logit models  to this dataset using brms (after Matteo's class on Stan) 
+ 
+ 
+ 

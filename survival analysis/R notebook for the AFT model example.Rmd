@@ -1,0 +1,188 @@
+---
+title: "AFT_LarynxLogNormal"
+output: html_notebook
+---
+## This is (part of) Example 12.1 in the textbook Rosner et al. (2021). 
+
+## An example of AFT models
+
+We read data andinvoke JAGS/Stan within R
+  
+
+```{r}
+rm(list=ls())
+#tlibrary(rstan)
+library(rjags)
+library(coda)
+library(ggmcmc)
+```
+
+```{r}
+setwd("C:/LocalDiskAlessandra/DocuLavoro/Didattica/StatisticaBayesiana/mat2425/SLIDES_2425/R-Notebooks_2425")
+
+df<-read.table("data_larynxcancer_wes.txt", header=T)
+
+colnames(df) <- c("stage", "time", "logtime", "age", "yr", "cens_time", "log_cens_time")
+
+head(df)
+df[90:106,]
+
+```
+Data on 90 male patients with cancer of larynx: 50 survival times are observed, 40 are right censored
+
+lifetime= time in months from diagnosis to death or censoring
+
+Subjects 1,2,3 have observed lifetime, while subject 4 is censored, i.e. T_i>2.5 
+
+COVARIATE:         
+* stage of the disease at diagnosis (1,2,3,4) (stage)        
+* year of diagnosis (Yr)      
+* age at diagnosis (age)
+
+age and Yr are treated as numeric and they are standardized 
+
+Extra 16 rows: covariates values for 16 NEW patients; we will compute their predictive distribution
+
+Remember that, for the log-normal model, $$ {\mathbb{e}}^{{\mathbf x}' {\mathbf \beta}}$$ is the median survival time of an individual with covariates $\mathbf x$. 
+
+> For people with the same age and year of diagnosis, we are interested in the (conditional) median lifetimes for individuals  in Stage 2,3 or 4 relative to Stage 1. This is the ratio between two median lifetimes, that of a patient with Stage 2 cancer (or 3, or 4) over that of a patient with Stage 1, and the same values of the rest of covariates:
+$${\mathbb{e}}^{\beta_2}, \quad{\mathbb{e}}^{\beta_3}\quad {\mathbb{e}}^{\beta_4}$$
+
+> In particular $${\mathbb{e}}^{\beta_3-\beta_4} $$ is the ratio between median lifetimes of Stage 3 versus Stage 4
+
+> We are also interested in the predictive 5-months survival for  16 NEW patients (see the covariates that have been fixed)
+
+N.B.: HERE in this dataset c= cens_time= 0 means that lifetime has been OBSERVED
+
+```{r}
+stage <- df$stage
+t <- df$time
+age <- df$age
+yr <- df$yr
+c <- df$cens_time
+```
+Here c =0 for the first 3 patients (with observed survival times)
+ 
+```{r}
+is.censored <- is.na(t) #indicator of censoring
+c[!is.censored] <- t[!is.censored] + 1
+```
+Now we redefine c_i corresponding to observed lifetime as a value larger that t_i (e.g. t_i +1)
+
+This is a TECHNICAL TRICK, that allows JAGS to simulate T_i for the non-observed survival times. See the txt file describing the model
+
+```{r}
+data <- list(oldn = 90, predn = 16,
+             stage = stage, t = t[1:90], predt = rep(NA, 16), age = age,
+             yr = yr, is.censored = is.censored[1:90], c = c[1:90]) 
+
+inits = list(beta=c(0,0,0,0,0,0),tau=1)
+```
+##### LarynxLogNormal.txt
+
+The likelihood for an individual with Stage 1 is 
+$ \log T_1= beta[1] + beta[5]*sAge[i] + beta[6]*sYr[i]$ 
+
+For an individual of Stage 2 is $ \log T_1= beta[1] + beta[2]+ beta[5]*sAge[i] + beta[6]*sYr[i]$ 
+
+For an individual of Stage 3 is $ \log T_1= beta[1] + beta[3]+ beta[5]*sAge[i] + beta[6]*sYr[i]$ 
+
+For an individual of Stage 4 is $ \log T_1= beta[1] + beta[4]+ beta[5]*sAge[i] + beta[6]*sYr[i]$ 
+
+
+ 
+```{r}
+jags_model <- jags.model(file = "LarynxLogNormal.txt", data = data,
+                         n.chains = 3, inits = inits)
+```
+```{r}
+ndraws <- 2000
+burnin <- 1000
+update(jags_model, burnin)
+```
+```{r}
+jags_output <- coda.samples(jags_model,
+                            variable.names = c('beta','predt'),
+                            n.iter=ndraws)
+```
+```{r}
+jags_df <- ggs(jags_output)
+jags_df %>%
+    group_by(Parameter) %>%
+    summarize(mean = mean(value),
+              sd = sd(value),
+              `2.5%` = quantile(value, .025),
+              median = median(value),
+              `97.5%` = quantile(value, .975))
+```
+
+```{r}
+data.out <- as.matrix(jags_output)
+data.out <- data.frame(data.out)
+attach(data.out)
+n.chain <- dim(data.out)[1]
+n.chain
+
+summary(data.out)
+names(data.out)
+```
+Acf and traceplots of the beta
+
+```{r}
+par(mfrow=c(2,3))
+acf(data.out[,'beta.1.'],lwd=3,col="red3",main="autocorrelation of beta1")
+acf(data.out[,'beta.2.'],lwd=3,col="red3",main="autocorrelation of beta2")
+acf(data.out[,'beta.3.'],lwd=3,col="red3",main="autocorrelation of beta3")
+acf(data.out[,'beta.4.'],lwd=3,col="red3",main="autocorrelation of beta4")
+acf(data.out[,'beta.5.'],lwd=3,col="red3",main="autocorrelation of beta5")
+acf(data.out[,'beta.6.'],lwd=3,col="red3",main="autocorrelation of beta6")
+
+par(mfrow=c(2,3))
+plot(ts(data.out[,'beta.1.']),xlab="t",ylab="beta1")
+plot(ts(data.out[,'beta.2.']),xlab="t",ylab="beta2")
+plot(ts(data.out[,'beta.3.']),xlab="t",ylab="beta3")
+plot(ts(data.out[,'beta.4.']),xlab="t",ylab="beta4")
+plot(ts(data.out[,'beta.5.']),xlab="t",ylab="beta5")
+plot(ts(data.out[,'beta.6.']),xlab="t",ylab="beta6")
+```
+```{r}
+mean(data.out[,'beta.2.']<0)
+mean(data.out[,'beta.3.']<0)
+mean(data.out[,'beta.4.']<0)
+mean(data.out[,'beta.5.']<0)
+
+```
+```{r}
+mean(data.out[,'beta.6.']>0)
+```
+compute the 95% posterior credible interval for beta
+```{r}
+# compute the 95% posterior credible interval for beta
+CI_beta = apply(data.out[,1:6], 2, quantile, c(0.025, 0.975)) 
+print(CI_beta)
+```
+
+Zero is within 95% posterior CI of beta5 (age) and beta6(Yr), so their effect is not so important from the statistical point of view. Instead, it is clear that having a cancer at Stage 3 or 4 decreases the average survival. 
+
+
+Let's examine the credibility regions for posterior predicted survivals  at 5 months 
+(last 16 rows of the dataset)
+
+```{r}
+predsurv <- apply(data.out[,7:22],2,"quantile",prob=c(0.025,0.5,0.975))
+print(predsurv)
+```
+
+$${\mathbb{e}}^{\beta_3-\beta_4} $$ is the ratio between median lifetimes of Stage 3 versus Stage 4, while the have the same age and same year at diagnosis
+```{r}
+mean(exp(data.out[,'beta.3.']-data.out[,'beta.4.']))
+median(exp(data.out[,'beta.3.']-data.out[,'beta.4.']))
+```
+Posterior probability that the median survival time of a patient with Stage 3 is larger that that of a patient with Stage 4, having fixed to the same value the other two covariate:
+ 
+```{r}
+mean(exp(data.out[,'beta.3.']-data.out[,'beta.4.'])>1)
+```
+ 
+ 
+#### Homework: among the saved parameters include med (medians corresponding to the covariates in the data) and RM (exp(\beta[j]), with are the relative ratio of the median survival times of two patients who differ only in 1 unit of the j-th covariate) and re-run the code. Monitor the marginal posterior of these "new" parameters. See the textbook for comments. 

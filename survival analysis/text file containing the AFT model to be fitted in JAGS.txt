@@ -1,0 +1,88 @@
+####### JAGS code for AFT model for the larynx cancer dataset ####
+# AFT model for data set on 90 males with larynx cancer. 
+# Model is a log-linear type of specification (AFT). 
+# lifetime= time in months from diagnosis to death or censoring
+# Covariates are:
+#
+#  - Stage of the disease at diagnosis time (one through four),             coded using dummies.
+#  - Age of patient at diagnosis
+#  - Yr, the year of diagnosis
+#
+# Age and Yr will be standardized (i.e. their means and sds are 
+#        0 and 1, respectively).
+#
+# The data also include c[i], redefined as t[i]+1 if i is not censored
+#                                           censoring time if censored (t[i]=NA)
+# Note: the last 16 lines of the data file contain points 
+#       at which we wish to make predictions for some combinations
+#       of Stage, Age and Yr, i.e. they are not actual data!
+#
+# The model uses a linear predictor function
+#
+#    mu[i] = beta1 + beta2 * S2[i] + beta3 * S3[i] + beta4 * S4[i]
+#            + beta5 * Age[i] + beta6 * Yr[i]
+#
+# We will use the specification T[i] ~  lognormal
+#
+# 
+# The median is exp(mu[i]). 
+# 
+#
+#  P(T[i] > t) = P(log(T[i] > log(t))) which we can use as survival function.
+##################
+#######   The MODEL in JAGS    
+
+model {
+   ### Create standardized covariates & means
+   for (i in 1:(oldn + predn)) {
+      sAge[i] <- (age[i]-mean(age[1:oldn]))/sd(age[1:oldn])
+      sYr[i] <- (yr[i]-mean(yr[1:oldn]))/sd(yr[1:oldn])
+      mu[i] <- beta[1] + beta[2]*equals(stage[i],2)
+               + beta[3]*equals(stage[i],3)
+               + beta[4]*equals(stage[i],4)
+               + beta[5]*sAge[i] + beta[6]*sYr[i]
+      # 5 month survival probabilities using covariates in the data
+      S[i] <- 1- phi((log(5)-mu[i])*sqrt(tau))
+    # Medians corresponding to the covariates in the data
+      med[i] <- exp(mu[i])
+    }
+   ### Model observed subjects
+   for (i in 1:oldn) {
+      is.censored[i] ~ dinterval(t[i], c[i])
+      t[i] ~ dlnorm(mu[i], tau)
+# The indicator is.censored takes the value 1 for censored data 
+#  0 for the others.
+# The function dinterval(s,c) takes the value 0 if s < = c 
+#                                         and 1 if s > c.
+# When i = 4 (censored data, t[4]=NA), the requirement 
+# is.censored[4] ~ dinterval(t[4], c[4]) 
+# becomes 1 ~ dinterval(NA, 2.5), which forces the unknown t[4] 
+# to be simulated from the lognormal (or any distribution specified for t[i])
+#   subject to the constraint that t[4] > 2.5.
+# When i=1 (observed data), the requirement 
+# is.censored[i] ~ dinterval(t[i], c[i]) becomes
+#   0 ~ dinterval(t[1], c[1]).
+# In general, this requirement would be automatically satisfied 
+# for any value t[1]  if c[1] (and cens of all
+# observed data) is LARGER than  t[1], so the 
+# actual value chosen for any c[i] corresponding to 
+# observed data is unimportant provided that it is sufficiently
+# large:  
+# in the R script, we have set 
+#   is.censored <- is.na(t) #indicator of censoring
+#   c[!is.censored] <- t[!is.censored] + 1
+    }
+    # Make predictions for combinations of covariates
+    for(i in 1:predn) {
+        predt[i] <- 1- plnorm(5,mu[i + oldn], tau) # survival prob after 5 months for the "new" patients
+       #predt[i] ~ dlnorm(mu[i + oldn], tau)
+    }
+
+   for (i in 1:6) {
+      beta[i] ~ dnorm(0,0.001)
+      rm[i] <- exp(beta[i])  # RMs for each variable
+   }
+   tau ~ dgamma(2,2)  # 0.1,0.1
+   sigma <- sqrt(1/tau)
+}
+

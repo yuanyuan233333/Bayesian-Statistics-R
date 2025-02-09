@@ -1,0 +1,298 @@
+---
+title: "Covariates' selection"
+output: html_notebook
+---
+### Covariate Selection 
+ 
+
+```{r}
+library(rjags)
+library(coda)
+
+# for plots
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(purrr)
+library(ggsci)
+require(gplots)
+require(ggpubr) 
+```
+#### REACH dataset
+Rheumatoid arthritis is an autoimmune disease characterized by chronic synovial inflammation and destruction of cartilage and bone in the joints. 
+
+The Rotterdam Early Arthritis Cohort (REACH) study was initiated in 2004 to investigate the development of rheumatoid arthritis in patients with early manifestations of joint impairment (compromissione articolare). Information regarding basic patient characteristics, serological  measurements, and patterns of disease involvement at baseline has been gathered in $n=681$ recruited patients. 
+
+It is of interest to know which of the following 12 factors are potentially associated with the development of rheumatoid arthritis considered as a binary (yes/no) outcome:  
+* ACCP (cyclic citrullinated peptide antibody),   
+* age,   
+* ESR (erythrocyte sedimentation rate, is the rate at which red blood cells sediment in a period of one hour),     
+* DC (duration of complaints in days),  
+* stiffness (duration of morning stiffness in minutes),   
+* RF (rheumatoid factor),  
+* gender,  
+* Sym (symmetrical pattern of joint inflammation; yes/no),   
+* SJC (swollen joint count),   
+* TJC (tender joint count),   
+* BCPH (bilateral compression pain in hands; yes/no),   
+* BCPF (bilateral compression pain in feet; yes/no).  
+
+The standard approach to analyze these data would be to use logistic/probit regression combined with some off-the-shelf variable selection method. 
+
+The F-to-out backward selection with p_D 0.05 yields a model with the following variables: 
+
+>   ACCP, ESR, DC, Sym, SJC, and BCPH
+
+The model with the most favorable value of the AIC selected  after an exhaustive model evaluation contains two extra variables: 
+
+>  RF and stiffness. 
+
+Which of these models provide the best approximation to the "true" underlying relationships is, if at all possible, difficult to assess.
+
+```{r}
+setwd("C:/LocalDiskAlessandra/DocuLavoro/Didattica/StatisticaBayesiana/mat2425/SLIDES_2425/R-Notebooks_2425/")
+ 
+```
+Upload the dataset
+```{r}
+reach <- read.table("REACH_data.txt", header=T)
+names(reach)
+head(reach)
+reach$gender <- reach$gender - 1
+```
+All continuous covariates have been standardized. Discrete covariates are: rf, gender, sym, bcp_hands, bcp_feet. Last column is the binary response. 
+ 
+```{r}
+sub.idx = 1:12  
+num.data = 681
+
+X <- as.matrix(reach[1:num.data,sub.idx])
+Y <- as.vector(reach[1:num.data,13])
+
+N <- dim(X)[1]
+p <- dim(X)[2]
+```
+
+```{r}
+#X
+#Y
+N; p
+```
+
+WE consider the SSVS prior, the spike and slab where the spike is a continuous distribution (Guassian) with variance very small
+
+##### Parameters of the  spike slab prior Set 1
+
+```{r}
+c_ss <- 100
+intersect <- 0.05
+ 
+```
+
+With this choice of hyperameters c_ss and intersection, the variance of the quasi-spike prior is
+```{r}
+tau_ss <- intersect / sqrt(2 * log(c_ss) * c_ss^2/(c_ss^2 - 1))
+tau_ss^2
+```
+while the variance of the slab is 
+```{r}
+(tau_ss*c_ss)^2
+ 
+```
+```{r}
+curve(dnorm(x, 0, tau_ss), xlim = c(-5, 5))
+curve(dnorm(x, 0, tau_ss * c_ss), xlim = c(-5, 5), add = T, col = 2)
+```
+the spike is super concentrated!
+
+Data to pass to JAGS (see the code in SSVS_probit.bug):
+```{r}
+data_JAGS_1 <-list(N = N, p = p, Y = Y, X = as.matrix(X), 
+                tau_ss = tau_ss, c_ss = c_ss)
+```
+A list of initial value for the MCMC algorithm that JAGS will implement
+```{r}
+inits = function() {
+  list(beta0 = 0.0, beta = rep(0,p), g = rep(0,p),
+       .RNG.seed = 321, .RNG.name = 'base::Wichmann-Hill') 
+}
+```
+
+First call to JAGS:
+```{r}
+model=jags.model("SSVS_probit.bug",
+                 data = data_JAGS_1,
+                 n.adapt = 1000,
+                 inits = inits,
+                 n.chains = 1)
+```
+burn in  = 1000: 
+```{r}
+update(model,n.iter=1000)
+```
+Posterior parameters JAGS will save + number of iterations+ thinning:
+```{r}
+param <- c("beta0", "beta", "g", "mdl")
+
+nit <- 50000 # number of iterations
+
+thin <-10 #thinning
+
+```
+
+The command coda.samle() calls jags from R passing the data and initial value just defined
+```{r}
+output <- coda.samples(model = model,
+                       variable.names = param,
+                       n.iter = nit,
+                       thin = thin)
+```
+```{r}
+#save(output,file='ssvs_1.dat') 
+load('ssvs_1.dat')
+```
+The output is an mcmc object of the library coda:
+```{r}
+str(output)
+```
+
+```{r}
+#plot(output)
+
+# summary
+summary(output)
+```
+To work with the posterior chains it is better  to cast the output to be an array object of R
+```{r}
+output <- as.matrix(output)
+```
+#### Some variable selection techniques:
+
+#### FIRST CRITERION: The median probability model (MPM): pick covariates with estimated posterior inclusion  probabilities higher than 0.5
+
+The estimated posterior inclusion probabilities are the posterior means of the gamma variables (in the code we have called them g)
+```{r}
+head(output)
+
+##We save the posterior chain of the inclusion variable in post_g
+post_g <-as.matrix(output[,14:25])
+post_mean_g <- apply(post_g,2,"mean")
+```
+```{r}
+p2 <- data.frame(value = post_mean_g, var = colnames(X)) %>%
+  ggplot(aes(y = value, x = var, fill = var)) + 
+  geom_bar(stat="identity") + 
+  geom_hline(mapping = aes(yintercept = .5), col = 2, lwd = 1.1) +
+  coord_flip() + 
+  theme_minimal() + 
+  theme(legend.position="none") + 
+  ylab("posterior inclusion probabilities") + 
+  xlab("")
+p2
+```
+Covariates selected: 
+```{r}
+# we will compare later the model with other methods
+mp_SSV1 <- as.vector(which(post_mean_g > 0.5))
+post_mean_g[mp_SSV1]
+head(X)
+```
+We have selected: accp, esr, sym, bcp_hands
+
+
+#### SECOND CRITERION: Highest posterior density model (HPD): pick a model with the highest estimated posterior probability 
+
+Recall that we have represented the model index using a binary coding as 
+> mdl=1+2^g1+...+2^gp
+
+the visited model are saved in the chain:
+```{r}
+plot(output[,"mdl"], pch = 20)
+```
+For example at iteration 10 the chain explored the model:
+```{r}
+output[10,"mdl"]
+```
+
+We start analyzing how many models have been visitedby the posterior chain:
+```{r}
+length(unique( output[,"mdl"]))
+# model visited out of 4096
+```
+Now we compute the posterior frequency of the visited  models:
+```{r}
+visited_models<-table(output[,"mdl"])
+visited_models
+```
+HPD model: getting the unique profiles and sort the results
+```{r}
+unique_model <- unique(post_g, MARGIN  = 1)
+freq <- apply(unique_model, 1, function(b) sum(apply(post_g, MARGIN = 1, function(a) all(a == b))))
+cbind(unique_model[order(freq,decreasing = T),], sort(freq,decreasing = T))
+```
+The HPD model is:
+```{r}
+colnames(X)[as.logical(unique_model[which.max(freq),])]
+HDP_SSV1 <- c(1:12)[as.logical(unique_model[which.max(freq),])]
+HDP_SSV1 # covariates selected with HPD
+```
+
+#### THIRD CRITERION - Variable selection by HS:
+```{r}
+beta= as.matrix(output[,1:12])
+# compute the 95% posterior credible interval for beta
+CI_beta = apply(beta, 2, quantile, c(0.025, 0.975)) 
+CI_beta
+```
+If the credibility interval does not contain 0 then I keep the variable in the model: 
+```{r}
+idx_cov_BL = NULL
+for(l in 1:p){
+  if(CI_beta[1,l]<0 && CI_beta[2,l]>0)
+  {
+    cat("*** variable ", colnames(reach)[l], " excluded \n")
+  }
+  else
+  {
+    cat("*** variable ", colnames(reach)[l], " included \n")
+    idx_cov_BL = c(idx_cov_BL, l)
+  }
+  
+}
+
+mean_beta_post <- apply(beta, 2, "mean")
+mean_beta_post
+
+```
+Boxplots:
+```{r}
+data.frame(x = as.vector(beta), var = rep(colnames(reach)[1:12], each = nrow(beta))) %>%
+  ggplot(aes(x = var, y = x, fill = var)) + 
+  geom_boxplot() + 
+  theme_bw() +
+  theme(legend.position = "null") + 
+  geom_hline(aes(yintercept = 0), col = 2, lty = 2) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  xlab("") + 
+  ylab("")
+```
+***
+Exercise: run the same exercise with hypereparameters of SCENARIO 2: 
+
+Parameters of the  spike slab prior Set 2
+```{r}
+c_ss <- 100               
+intersect <- 0.1
+tau_ss <- intersect / sqrt(2 * log(c_ss) * c_ss^2 / (c_ss^2 - 1))
+```
+
+With this choice of hyperameter, c_ss and intersection  the variance of the quasi-spike prior is
+```{r}
+tau_ss^2 
+```
+While the variance of the slab is: 
+```{r}
+(tau_ss*c_ss)^2
+```
+
+

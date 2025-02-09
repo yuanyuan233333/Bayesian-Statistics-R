@@ -1,0 +1,372 @@
+---
+title: "Regression Model checking"
+output: html_notebook
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## LINEAR REGRESSION with iid $N(0,\sigma^2)$ errors
+
+### Section 9.2.6 An Example in J. Albert's book
+
+```{r}
+ rm(list=ls())
+library(LearnBayes) 
+```
+
+However, **DO NOT USE LearnBayes package** for your project, since the
+package has only an educational purpose
+
+```{r}
+data(birdextinct)
+attach(birdextinct)
+
+birdextinct
+```
+
+The DATASET concerns EXTINCTION of BIRDS
+
+Measurements on breedings ("in cova") pairs of landbird species were
+collected from 16 islands about Britain over several decades.
+
+For each pairs (62 in total), the dataset records:    
+* SPECIES = name of bird species   
+* TIME = average time of extinction on the islands   
+* NESTING = average number of nesting pairs   
+* SIZE = size of the species, 1 or 0 if large or small   
+* STATUS = status of the species, 1 or 0 if resident or migrant.
+
+LINEAR MODEL for TIME, using NESTING, SIZE, STATUS as covariates.
+
+```{r}
+plot(birdextinct)
+```
+
+Better consider TIME in the log scale!
+
+```{r}
+logtime=log(time)
+plot(nesting,logtime)
+```
+
+POSITIVE CORRELATION between these two variables!
+
+OUTLIER ??: probably datapoints with log(time)>3; we will monitor at
+least those datapoints.
+
+```{r}
+out = (logtime > 3)
+plot(nesting,logtime)
+text(nesting[out], logtime[out], label=species[out], pos = 2)
+```
+
+```{r}
+# Command JITTER adds a small amount of noise to a numeric vector
+par(mfrow=c(1,2))
+plot(jitter(size),logtime,xaxp=c(0,1,1))
+plot(jitter(status),logtime,xaxp=c(0,1,1))
+```
+
+##### ML/frequentist estimates
+```{r}
+fit=lm(logtime~nesting+size+status,data=birdextinct,x=TRUE,y=TRUE)
+summary(fit)
+```
+
+NESTING is a strong effect.
+
+Estimate of the effect of SIZE is negative: small species (SIZE=1) have
+shorter extinction times.
+
+```{r}
+fit$x
+fit$y
+plot(fit$residual)
+```
+
+The function *blinreg* adopts a Zellner's g-prior:
+
+The output is a Monte Carlo sample (iid) from the posterior of
+$\theta=(\beta,\sigma)$
+
+It gives a simulated sample from the joint posterior distribution of the
+regression vector and the error standard deviation for a linear
+regression model with a (noninformative or) Zellner g prior.
+
+INPUT: response vector $y$, design matrix $X$, num. of iterations, prior
+list with components c0 and beta0 of Zellner's g prior:
+$N_p(b0, \sigma^2 (c0 (X^t X)^{-1})) \times 1/\sigma^2$
+
+```{r}
+prior=list(b0=c(0,0,0,0), c0=10)  #c0\in [10,100]
+theta2.sample=blinreg(fit$y,fit$x,5000,prior=prior)
+```
+
+> LET US FOCUS on the posterior OUPUT rather than on this "silly" prior
+
+The analysis below is an example of the output you could monitor
+whichever is the prior.
+
+In this case, the posterior distribution can be factorized as the
+posterior conditional of $\beta$, given $\tau$ and $y$:
+
+$\beta |\tau, y\sim N_p(c0/(c0+1)(b0/c0 + \hat \beta), \sigma^2 * c0/(c0+1)* (X^t X)^{-1})) )$\$
+
+while the marginal posterior of $\tau$, given $y$, is
+gamma$(n/2, s^2/2+ ...)$
+
+##### Posterior plots
+```{r}
+par(mfrow=c(2,2))
+hist(theta2.sample$beta[,1],main="INTERCEPT",xlab=expression(beta[0]),prob=T)
+hist(theta2.sample$beta[,2],main="NESTING",xlab=expression(beta[1]),prob=T)
+hist(theta2.sample$beta[,3],main="SIZE",xlab=expression(beta[2]),prob=T)
+hist(theta2.sample$beta[,4],main="STATUS",xlab=expression(beta[3]),prob=T)
+```
+
+```{r}
+par(mfrow=c(1,2))
+hist(1/((theta2.sample$sigma)^2),main="PRECISION TAU",xlab=expression(tau),prob=T)
+hist(theta2.sample$sigma,main="ERROR SD",xlab=expression(sigma),prob=T)
+```
+
+Posterior quantiles and means of beta parameters and $\sigma$:
+
+```{r}
+apply(theta2.sample$beta,2,quantile,c(.05,.5,.95))
+apply(theta2.sample$beta,2,mean)
+fit$coefficients #  frequentist estimates 
+
+quantile(theta2.sample$sigma,c(.05,.5,.95))
+#posterior mean of sigma is larger  than the frequentist estimate 
+mean(theta2.sample$sigma)
+sqrt(sum(fit$residuals^2)/(62-4)) #frequentist estimate
+```
+
+------------------------------------------------------------------------
+
+##### Estimating mean extinction times
+
+We'd like to estimate the function of beta:
+$E(Y_{new}|\beta, X1)=X_1*\beta$, $X_1$ is a "new" covariate matrix;
+this function is a LINEAR COMBINATION of the beta parameters.
+
+For instance, we want to estimate the average response (extinction
+time) of a new species with covariates cov4=c(1,4,1,1), i.e. we estimate
+$$E(Y_{new}|\beta, cov4)=\beta_0+4\beta_1+\beta_2+\beta_3$$ We use a
+function of the LearnBayes package (*blinregexpected*), but in general
+it is easy to simulate the function above if we have the whole MC Markov
+chain from the posterior.
+
+```{r}
+cov1=c(1,4,0,0) #A
+cov2=c(1,4,1,0) #B
+cov3=c(1,4,0,1) #C
+cov4=c(1,4,1,1) #D
+X1=rbind(cov1,cov2,cov3,cov4)
+mean.draws=blinregexpected(X1,theta2.sample)
+```
+
+We plot the marginal posterior distributions of 4 parameters that
+represent average values of the response relative to "new" covariates.
+
+```{r}
+c.labels=c("A","B","C","D")
+par(mfrow=c(2,2))
+for (j in 1:4)
+hist(mean.draws[,j], main=paste("Covariate set",c.labels[j]),xlab="log TIME",prob=T)
+```
+
+##### Posterior predictive distributions - Predicting extinction time
+
+Before we simulated the posterior of E(y_new\|X1) - that is a function
+of the 4 regression parameters.
+
+Now we want to simulate the predictive distribution of y_new, relative
+to the same "new covariates" X1.
+
+This is easy to do: we simulate from the likelihood of new data when the
+parameters are the different iteration of the posterior simulated
+values.
+
+```{r}
+pred.draws=blinregpred(X1,theta2.sample)
+
+c.labels=c("A","B","C","D")
+par(mfrow=c(2,2))
+for (j in 1:4)
+hist(pred.draws[,j],main=paste("Covariate set",c.labels[j]),xlab="log TIME",prob=T)
+```
+
+------------------------------------------------------------------------
+
+#### MODEL CHECKING via POSTERIOR PREDICTIVE DISTRIBUTIONS
+
+From the book Gelman et al. (2014) - $Y_i^{new}$ is "the replicated data
+that could have been observed, or, to think predictively, as:
+
+*the data that we would see tomorrow if the experiment that produced*
+$y_i$ *today were replicated with the same model and the same value of*
+$\theta$ that produced the observed data $y_i$
+
+If the model fits, then replicated data generated under the model should
+look similar to observed data.
+
+To put another way, the observed data should look PLAUSIBLE under the
+posterior predictive distribution.
+
+This is a self-consistency test! Any systematic differences between the
+simulations and the data indicate potential failings of the model.
+
+As an ALTERNATIVE, apply the CROSS-VALIDATION approach - see BELOW!
+
+Specifically, we compute the predictive distribution of
+$Y_1,\ldots,Y_{62}$, given the same covariates associated to the $y_i$'s
+in the observed sample. In this case, because the example is simple, we
+obtain iid draws from the posterior predictive (simulating independent
+draws from the likelihood with each iid simulated value from the
+posterior).
+
+More in general, it is easy to simulate from the posterior predictive of
+each $Y_i$ simulating one draw from the likelihood for each MCMC draw of
+the posterior.
+
+We also compute 0.05- and 0.95-quantiles of the posterior predictive of
+each $Y_i$, $i=1,\ldots,62$.
+
+```{r}
+pred.draws=blinregpred(fit$x,theta2.sample)
+pred.sum=apply(pred.draws,2,quantile,c(.05,.95))
+```
+
+Plot the posterior predictive 90% CI and the datapoints and consider
+species datapoints outside these intervals as OUTLIERS
+
+```{r}
+ind=1:length(logtime)
+matplot(rbind(ind,ind),pred.sum,type="l",lty=1,col=1,xlab="INDEX",ylab="log TIME")
+points(ind,logtime,pch=19)
+
+out=(logtime>pred.sum[2,]| logtime<pred.sum[1,])
+text(ind[out], logtime[out], label=species[out], pos = 4)
+```
+
+#### BAYESIAN PREDICTIVE p-values
+
+More precisely, we should call them as **POSTERIOR PREDICTIVE TAIL
+PROBABILITIES**:
+$$\min( P(Y_i^{new}>y_i|x_i,data), P(Y_i^{new}<y_i|x_i, data)), i=1,\ldots,n$$
+Compute how many simulated values from the predictive of $Y_i^{new}$ are
+$> y_i$ (over the total numumber of simulations): this is an estimate of
+$P(Y_i^{new}>y_i|data, x_i)$
+
+```{r}
+ind_pvalue=t((t(pred.draws)>logtime))
+pred.suptail=apply(ind_pvalue,2,sum)/5000
+prob.tail<-rep(0, 62) 
+for (i in 1 : 62)
+  prob.tail[i]=min(pred.suptail[i],1-pred.suptail[i])
+## this is the PREDICTIVE TAIL PROBABILITY of item i
+```
+This is the *PREDICTIVE TAIL PROBABILITY* of item $i$, $i=1,\ldots,n$:   
+* if this number is close to 1/2, the corresponding predictive distribution "explain" well the datapoint,   
+* if this number is close to 0, the datapoint is an "outlier" for the model
+
+In the following plot, let's mark as OUTLIERS those species such that the BAYESIAN PREDICTIVE p-value is smaller than 0.05 (or than 0.1)
+```{r}
+par(mfrow=c(1,2))
+plot(ind, prob.tail)
+abline(h=0.05)
+
+plot(ind,logtime,pch=19)
+
+out2=(prob.tail<0.05)
+text(ind[out2], logtime[out2], label=species[out2], pos = 4)
+```
+***
+#### Predictive Bayesian error
+Compute mean and sd of all n posterior predictive distributions first. 
+
+Then compute the difference between the predictive mean and observed datapoint, over the sd of the predictive distribution. This is the **predictive Bayesian error**.
+
+Consider as an OUTLIER all data such that the corresponding residual is LARGE  e.g. its absolute value is larger than 2 (or 3)
+
+```{r}
+pred.mean=apply(pred.draws,2,mean)
+pred.sd=apply(pred.draws,2,sd)
+```
+Bayesian residuals - threshold fixed at 2
+```{r}
+bres= (pred.mean- logtime)/pred.sd    
+out2 = (abs(bres) > 2)
+```
+Plots
+```{r}
+par(mfrow=c(1,1))
+plot(ind,bres,cex=1)
+text(nesting[out2], bres[out2], label=species[out2], pos = 4)
+```
+#### Predictive goodness-of-fit: SUM of the squares of the predictive Bayesian residuals to compare different models 
+
+The "best" model is the one with the smallest value for this index
+```{r}
+sum(bres^2)
+```
+***
+
+### LPML and  $CPO_i$
+
+Conditional density of each Y_i, given parameters, is Gaussian with mean 
+$X*\beta$ and variance $\sigma^2$
+
+We use the function *blinregexpected*, though we can simulate a MCMC from $X*\beta$ 
+```{r}
+ mean.draws.data=blinregexpected(fit$x,theta2.sample)
+dim(mean.draws.data)
+
+cpo=seq(1,62)
+for (i in 1:62){
+cpo[i]=1/mean(1/dnorm(fit$y[i],mean.draws.data[,i], theta2.sample$sigma))
+}
+
+1/mean(1/dnorm(fit$y[2],mean.draws.data[,2], theta2.sample$sigma)) # this is  CPO[2] of item i=2
+
+LPML=sum(log(cpo))
+LPML
+```
+LPML has not a meaning *per se*, but it is meaningful when compared to LPML of other models
+
+##### Repeat the analysis WITHOUT covariate "status"
+```{r}
+fit2=lm(logtime~nesting+size,data=birdextinct,x=TRUE,y=TRUE)
+summary(fit2)
+
+fit2$x
+fit2$y
+```
+SAMPLING from the posterior with the Zellner g prior as before
+```{r}
+prior3=list(b0=c(0,0,0), c0=10)  #c0\in [10,100]
+theta3.sample=blinreg(fit2$y,fit2$x,5000, prior=prior3)
+```
+##### LPML
+```{r}
+mean.draws3.data=blinregexpected(fit2$x,theta3.sample)
+dim(mean.draws3.data)
+
+cpo3=seq(1,62)
+for (i in 1:62){
+cpo3[i]=1/mean(1/dnorm(fit$y[i],mean.draws3.data[,i], theta3.sample$sigma))
+}
+
+
+LPML3=sum(log(cpo3))
+LPML3
+```
+##### The best model is the one with LARGEST LPML: which model is better, then?
+
+```{r}
+LPML; LPML3
+```
+
