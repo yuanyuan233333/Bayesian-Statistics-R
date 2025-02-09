@@ -1,0 +1,231 @@
+---
+title: "Ex. in Chapter 1 in Hoff (2009). A first course in Bayesian statistical methods. Springer"
+output: html_notebook
+---
+
+# Bayesian inference on a proportion
+
+Suppose we are interested in the prevalence of an infectious disease $\theta$ in a small city. The higher the prevalence, the more public health precautions we would recommend to be put into place.
+
+Sample: 20 individuals checked for infection **BEFORE** the sample is obtained, the number of infected individuals $Y$ is **UNKNOWN**. If $\theta$ were known, a reasonable sampling model for $Y$ is
+
+$$
+ Y \mid \theta \sim Bin \left(20,\theta\right).
+$$
+
+## Likelihood
+
+What is the "true" distribution for $Y$? It depends on the "true" value of $\theta$!
+
+Let: $Y$ be the *number of infected individuals in the sample*.
+
+```{r}
+# Set current directory
+setwd("/Users/xueyuanhuang/Desktop/R-bayesain/")
+
+# Define variables
+n <- 20
+x <- 0:n
+del <- 0.25
+
+# Plot - distribution on Y as \theta varies
+plot(range(x-del), c(0,.4), xlab = "number infected in the sample", ylab = "probability", type = "n")
+points(x - del, dbinom(x, n, .05), type="h", col=gray(.75), lwd=3)
+points(x, dbinom(x, n, .10), type="h", col=gray(.5), lwd=3)
+points(x + del, dbinom(x, n, .20), type="h", col='blue', lwd=3)
+
+# Add legend
+legend(10,.35,
+       legend=c(expression(paste(theta," = 0.05", sep="")),
+                expression(paste(theta," = 0.10", sep="")),
+                expression(paste(theta," = 0.20", sep="")) ),
+       lwd=c(3,3,3),
+       col=c(gray(c(.75,.5)),'blue'), bty="n") 
+```
+
+Under these assumptions, what is the probability that there is no infected individual in the sample? It depends on $\theta$!
+
+If $\theta = 5\%$, the probability that there is no infected individual in the sample is:
+
+```{r}
+# P(Bin(20, 0.05) = 0)
+dbinom(0, 20, 0.05)
+```
+
+If $\theta = 10\%$, the probability is:
+
+```{r}
+# P(Bin(20, 0.1) = 0)
+dbinom(0, 20, 0.1)
+```
+
+Finally, if $\theta = 20\%$, the probability is:
+
+```{r}
+# P(Bin(20, 0.2) = 0)
+dbinom(0, 20, 0.2)
+```
+
+## Prior distribution
+
+Other studies from various parts of the country indicate that the infection rate in comparable cities ranges from about $0.05$ to $0.2$ with an average prevalence of $0.1$.
+
+We have to find a prior distribution on $\theta$ consistent with this information.
+
+> A prior $\pi\left(\theta\right)$ that assigns a substantial amount of prob to $\left(0.05,0.2\right)$ and with expected value close to $0.1$.
+
+There are infinite priors consistent with these 2 conditions! But for some reasons (wait a couple of classes!) we consider Beta distributions. Then, a priori:
+
+$$
+\theta \sim Beta(a,b)
+$$
+
+Let us check our prior in case $a = 2$ and $b = 20$
+
+```{r}
+# Set Beta prior parameters
+a <- 2 ; b <- 20
+
+# Prior Mean
+cat(sprintf("Prior Mean: %f\n", a / (a+b)))
+
+# Prior mode, if a, b > 1
+cat(sprintf("Prior Mode: %f\n", (a-1) / (a-1 + b-1)))
+
+# P(0.05 < \theta < 0.2)
+cat(sprintf("P(0.05 < theta < 0.2): %f\n", pbeta(.20, a, b) - pbeta(.05, a, b)))  
+
+# P(\theta <= 0.10)
+cat(sprintf("P(theta < 0.1): %f\n", pbeta(.10,a,b)))
+```
+
+We now compare two Beta distributions w.r.t. the choice of prior parameters
+
+```{r}
+# Plot - Comparison between Beta distributions
+p=seq(0,1,length=500)
+plot(p, dbeta(p,0.5,0.5), xlab = "", ylab = "", type = "l", lwd=2, ylim=c(0,8),
+     main="Comparison among beta densities")
+lines(p,dbeta(p,2,3),ylim=c(0,8),col="red", lwd=2)
+lines(p,dbeta(p, a,b), ylim=c(0,8),col=3,lwd=2)
+```
+
+We then show the prior distribution chosen in this example
+
+```{r}
+# Plot - Prior chosen in this example
+p=seq(0,1,length=500)
+plot(p, dbeta(p,a,b), xlab = "", ylab = "", type="l", ylim=c(0,8),
+     main="PRIOR distribution", lwd = 2)
+```
+
+## Observed data
+
+Now, suppose that there are no infected individual in the observed sample.
+In this case the frequentist estimate of $\theta$ given by the empirical proportion is $0$.
+This value is totally useless, thus requiring ad-hoc procedure like adjusted Wald intervals.
+
+``` {r}
+# Set observed data to 0 and sample size to 20
+y<-0; n<-20 
+```
+
+## Posterior distribution
+A posteriori, we have:
+
+$$
+\theta \mid y\sim Beta\left(a + y, b + n - y\right).
+$$
+
+The posterior density represents our **uncertainty** on the proportion of infected
+individuals in the small town considered, given observation  $y = 0$ (no infected
+individuals over 20 selected in this small town)
+
+Let us compute relevant quantities of the posterior distribution
+
+```{r}
+# Set prior parameters
+a <- 2 ; b <- 20
+
+# Posterior mean
+cat(sprintf("Posterior Mean: %f\n", (a+y) / (a+b+n)))
+
+# Posterior mode
+cat(sprintf("Posterior Mode: %f\n", (a+y-1)/(a-1+b+n-1)))
+
+# P(0.05 < theta < 0.2 | y)
+cat(sprintf("P(0.05 < theta < 0.2 | y): %f\n", pbeta(.20, a+y, b+n-y) - pbeta(.05, a+y, b+n-y)))
+
+# P(theta < 0.1 | y)
+cat(sprintf("P(theta < 0.1 | y): %f\n", pbeta(.10, a+y, b+n-y)))
+```
+
+We now plot the prior and posterior distribution:
+
+```{r}
+# Plot - prior and posterior distribution
+theta<-seq(0,1,length=500)
+plot(theta, dbeta(theta,a+y,b+n-y), type="l",
+     xlab="percentage infected in the population",
+     ylab="", lwd=2, ylim=c(0,16), xlim=c(0,0.5))
+lines(theta, dbeta(theta,a,b),col="gray",lwd=2)
+
+# Add legend
+legend(.3,14, legend=c(expression(paste(italic("p"),"(",theta,")",sep="")), 
+                       expression(paste(italic("p"),"(",theta,"|",italic("y"),")",sep=""))), 
+       bty="n", lwd=c(2,2),col=c("gray","black"))
+```
+
+This is a first example of **Bayesian Learning**. Let us see how we updated our 
+prior belief il light of the observed data:
+
+```{r}
+# Prior and Posterior mean:
+cat(sprintf("Prior Mean: %f\n", a / (a+b)))
+cat(sprintf("Posterior Mean: %f\n", (a+y) / (a+b+n)))
+
+# Prior and posterior mode
+cat(sprintf("Prior Mode: %f\n", (a-1) / (a-1+b-1)))
+cat(sprintf("Posterior Mode: %f\n", (a+y-1)/(a-1+b+n-1)))
+
+# Prior and posterior P(0.05 < theta < 0.2)
+cat(sprintf("P(0.05 < theta < 0.2): %f\n", pbeta(.20, a, b) - pbeta(.05, a, b)))
+cat(sprintf("P(0.05 < theta < 0.2 | y): %f\n", pbeta(.20, a+y, b+n-y) - pbeta(.05, a+y, b+n-y)))
+
+# Prior and posterior P(theta < 0.1)
+cat(sprintf("P(theta < 0.1): %f\n", pbeta(.10,a,b)))
+cat(sprintf("P(theta < 0.1 | y): %f\n", pbeta(.10, a+y, b+n-y)))
+```
+
+Note that, a posteriori:
+
+$$
+\mathbb{E}\left(\theta \mid y\right) = \frac{(a+y)}{(a+b+n)} = \frac{n}{(a+b+n)}\cdot\frac{y}{n} + \frac{a+b}{a+b+n}\cdot\frac{a}{a+b}
+$$
+## Classical inference
+
+Point estimate of $\theta$ is $\frac{y}{n}$, though  $y=0$, so that the point estimate of  $\theta$ equals $0$: the estimate makes no sense! 
+
+a possible solution is to rely on Adjusted Wald Interval
+
+$$
+\hat{\theta}_{wald} = \frac{n}{n+4}\cdot\frac{y}{n} + \frac{4}{n+4}\cdot\frac{1}{2}
+$$
+
+```{r}
+# Compute adjusted Wald interval
+cat(sprintf("Adj. Wald Estimate: %f\n", n/(n+4)*(y/n) + 4/(n+4)*(1/2)))
+
+# Compute Posterior mean in case of Beta(2,2) prior 
+a <- 2; b <- 2
+cat(sprintf("Post. Mean w. Beta(2,2): %f\n", (y+a)/(n+a+b)))
+```
+
+The adjusted wald estimate corresponds to the posterior mean of $\theta$ when the prior is   Beta(2,2)!!
+
+Finally, we provide the interval estimate given the adjusted wald interval
+
+```{r}
+th <- n/(n+4)*(y/n) + 4/(n+4)*(1/2)
+th + c(-1,1)*1.96*sqrt(th*(1-th)/n) #  interval estimates
+```

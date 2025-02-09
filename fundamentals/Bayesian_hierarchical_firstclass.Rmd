@@ -1,0 +1,380 @@
+---
+title: "A BAYESIAN HIERARCHICAL Model - Ex. 8.4 from P. Hoff's book"
+output: html_notebook
+---
+
+## Bayesian Model
+
+$Y_{ij}$ is the mathscore test of student $i$ in school $j$
+
+$i=1,\ldots, n_j$, $j=1,\ldots,J$, $\quad J=100$ schools
+
+$$
+\begin{align*}
+  Y_{1,j},\ldots, Y_{n_j,j} \mid \theta_j &\stackrel{iid}\sim N(\theta_j,\sigma^2) \qquad \textrm{  within-group model} \quad j=1,\ldots,J \\
+  \theta_1,\ldots, \theta_J \mid (\mu,\tau^2) &\stackrel{iid}\sim N(\mu,\tau^2) \qquad  \textrm{ between-group model}\\
+  (\mu,\tau^2) &\sim \pi
+\end{align*}
+$$
+
+where $\theta_j$ is the parameter expressing the average value of the mathscore in school $j$
+
+$\mu$ is the mean of all $\theta_j$'s, and it is also the mean of all mathscores $Y_{ij}$
+
+```{r}
+# Multilevel data
+rm(list=ls())
+setwd("/Users/xueyuanhuang/Desktop/R-bayesain/fundamentals")
+Y=read.table("school.mathscores.txt") 
+Y
+dim(Y)
+head(Y)
+```
+
+Y scores at the math test for 1993 students in 100 US schools
+
+-   First column: **index of the school** of the student
+-   Second column: **math score of the student**
+-   Third column: **socio-economic indicator of the student** (not relevant in this class)
+
+Let us compute now the means per school of the math scores:
+
+```{r}
+m = length(unique(Y[,1]))
+n<-sv<-ybar<-rep(NA,m) 
+for(j in 1:m) 
+{ 
+  ybar[j]<- mean(Y[Y[,1]==j,2]) #empirical mean per group
+  sv[j]<-var(Y[Y[,1]==j,2])  #empirical variance per group
+  n[j]<-sum(Y[,1]==j)        #frequencies  
+}
+```
+
+Summary of the empirical mathscore means, of the frequencies, of the variances:
+
+```{r}
+cat(paste("Means:", ybar))
+cat(paste("Freq:", n))
+cat(paste("Vars:", sv))
+```
+
+Let's plot these summaries
+
+```{r}
+par(mfrow=c(1,2), mar=c(3,3,1,1),mgp=c(1.75,.75,0)) 
+
+# Plot - sample means
+hist(ybar,main="",xlab="sample mean")
+
+# Plot - sample sizes
+plot(n,ybar,xlab="sample size",ylab="sample mean")
+```
+
+**LEFT**: histogram of the empirical means per school $ybar_j$
+
+**RIGHT**: very extreme sample averages (very small or very large) tend to be associated with schools with small sample size
+
+Remember that, given the same sample mean, the sample var in group $j$ is $\sigma^2/n_j$: the smaller is $n_j$, the larger is the variability of $ybar_j$.
+
+> Parameters of the model are $(\theta_1,\ldots,\theta_{100}, \mu, \tau^2,\sigma^2)$
+
+-   $\theta_j$: mean in school $j$;
+-   $\mu$: grand mean;
+-   $\tau^2$: variance between schools;
+-   $\sigma^2$: variance within school $j$ (costant)
+
+The prior for $\theta_1,\ldots,\theta_{100}$ is given by a hierarchy, and it is an exchangeable prior
+
+$$
+\begin{align*}
+  \theta_1,\ldots, \theta_J \mid (\mu,\tau^2) &\stackrel{iid}\sim N(\mu,\tau^2)\\[5pt]
+  (\mu,\tau^2)&\sim \pi
+\end{align*}
+$$
+
+Then, we assume the following prior for $\sigma^2$, within-group variance (constant in this case, but a more general model with $\sigma_j^2$ can be considered), $\tau^2$, the between-group variance and $\mu$, the grand mean (a priori independent): 
+
+$$
+\begin{align*}
+  \frac{1}{\sigma^2} &\sim gamma\left(\frac{\nu_0}{2},\frac{\nu_0\sigma_0^2}{2}\right) \\[5pt]
+  \frac{1}{\tau^2} &\sim gamma\left(\frac{\eta_0}{2},\frac{\eta_0\tilde\sigma_0^2}{2}\right) \\[5pt]
+  \mu &\sim N\left(\mu_0,\gamma_0^2\right)
+\end{align*}
+$$
+
+Hyperparameters are fixed via **a priori information**:
+
+Hyperparameters of the prior for mu
+
+A priori $\mathbb{P}\left(\mu \in (40,60)\right)= 0.94$ and $\mathbb{E}\left(\mu\right) = 50$ that is the national average of the test
+
+This is an informative prior, set by info on this type of test administered to the rest of the country
+
+```{r}
+par(mfrow=c(1,1))
+
+# Prior hyperparameters for sigma^2, within-group variance
+nu0<-1; s20<-100   
+
+# Plot - Prior for 1/sigma^2
+pippo=rgamma(1000, shape=nu0/2, rate=nu0/2*s20 )
+hist(pippo,prob=T,main='Prior for 1/sigma^2')
+```
+
+We compute mean and variance of this prior distribution
+
+```{r}
+cat(paste("Mean:", mean(1/pippo)))
+cat(paste("Var:", var(1/pippo)))
+```
+
+Note that both mean and variance of $\sigma^2$ are $+\infty$.
+
+```{r}
+# Prior hyperparameters for tau^2
+eta0<-1 ; t20<-100
+
+# Prior hyperparameters for mu
+mu0<-50 ; g20<-25  
+```
+
+## MCMC analysis for the school data
+
+Starting values of the MC & MCMC algorithm:
+
+```{r}
+# Initialize parameters
+theta<-ybar
+sigma2<-mean(sv)
+mu<-mean(theta)
+tau2<-var(theta)
+
+# Set random seed and number of iterations
+set.seed(1)
+S<-3000
+
+# Prepare buffers to store results
+THETA<-matrix( nrow=S,ncol=m)
+MST<-matrix( nrow=S,ncol=3)
+
+### MCMC algorithm - GIBBS SAMPLER
+for(s in 1:S) {
+
+  # sample new values of the thetas
+  for(j in 1:m) {
+    vtheta<-1/(n[j]/sigma2+1/tau2)
+    etheta<-vtheta*(ybar[j]*n[j]/sigma2+mu/tau2)
+    theta[j]<-rnorm(1,etheta,sqrt(vtheta))
+  }
+
+  # sample new value of sigma2
+  nun<-nu0+sum(n)
+  ss<-nu0*s20;for(j in 1:m){ss<-ss+sum((Y[Y[,1]==j,2 ]-theta[j])^2)}
+  sigma2<-1/rgamma(1,nun/2,ss/2)
+
+  # sample a new value of mu
+  vmu<- 1/(m/tau2+1/g20)
+  emu<- vmu*(m*mean(theta)/tau2 + mu0/g20)
+  mu<-rnorm(1,emu,sqrt(vmu)) 
+
+  # sample a new value of tau2
+  etam<-eta0+m
+  ss<- eta0*t20 + sum( (theta-mu)^2 )
+  tau2<-1/rgamma(1,etam/2,ss/2)
+
+  # store results
+  THETA[s,]<-theta
+  MST[s,]<-c(mu,sigma2,tau2)
+}
+```
+
+-   `THETA` contains simulated values for all 100 parameters $\theta_j$'s
+-   `MST` stores simulated values for $\mu$, $\sigma^2$, $\tau^2$.
+
+**MARGINAL POSTERIOR densities of** $\mu$, $\sigma^2$, $\tau^2$
+
+```{r}
+par(mfrow=c(1,3),mar=c(2.75,2.75,.5,.5),mgp=c(1.7,.7,0))
+
+# Plot - Marginal posterior of mu
+plot(density(MST[,1],adj=2),xlab=expression(mu),main="",lwd=2,
+ylab=expression(paste(italic("p("),mu,"|",italic(y[1]),"...",italic(y[m]),")")))
+abline( v=quantile(MST[,1],c(.025,.5,.975)),col="gray",lty=c(3,2,3) )
+
+# Plot - Marginal posterior of sigma^2
+plot(density(MST[,2],adj=2),xlab=expression(sigma^2),main="", lwd=2,
+ylab=expression(paste(italic("p("),sigma^2,"|",italic(y[1]),"...",italic(y[m]),")")))
+abline( v=quantile(MST[,2],c(.025,.5,.975)),col="gray",lty=c(3,2,3) )
+
+# Plot - Marginal posterior of tau^2
+plot(density(MST[,3],adj=2),xlab=expression(tau^2),main="",lwd=2,
+ylab=expression(paste(italic("p("),tau^2,"|",italic(y[1]),"...",italic(y[m]),")")))
+abline( v=quantile(MST[,3],c(.025,.5,.975)),col="gray",lty=c(3,2,3))
+```
+
+**POSTERIOR MEANS of** $\mu$, $\sigma^2$, $\tau^2$
+
+```{r}
+cat(paste("Post. Mean of mu:", mean((MST[,1]))))
+cat(paste("Post. Mean of sigma^2:", mean(sqrt(MST[,2]))))
+cat(paste("Post. Mean of tau^2:", mean(sqrt(MST[,3]))))
+```
+
+**SHRINKAGE effect towards grand mean mu**
+
+`theta.hat` is posterior means of $\theta_j$, i.e., the Bayesian estimate of $\theta_j$
+
+```{r}
+theta.hat <- apply(THETA,2,mean)
+cat(paste("theta.hat:", theta.hat))
+```
+
+```{r}
+par(mfrow=c(1,2), mar=c(3,3,1,1), mgp=c(1.75,.75,0))
+
+# Plot - ybar vs theta.hat
+plot(ybar,theta.hat,xlab=expression(bar(italic(y))),ylab=expression(hat(theta)))
+abline(0,1)
+
+# Plot - Differences between bayesian and frequentist estimates
+plot(n,ybar-theta.hat,ylab=expression( bar(italic(y))-hat(theta) ),xlab="sample size")
+abline(h=0)
+```
+
+**LEFT**: ybar on the $x$-axis ('classical' estimates, sample means per school) and theta.hat on the $y$-axis (Bayesian estimates). The slope of this line is $<1$, that is, high values of $ybar_j$ correspond to slightly less high values of the Bayesian estimates of $\theta_j$, and low values of $ybar_j$ correspond to slightly less low values of the Bayesian estimates of $\theta_j$. This is the **SHRINKAGE effect**.
+
+**RIGHT**: group-specific sample sizes on the $x$-axis, and differences between frequentist and Bayesian estimates on the $y$-axis. Groups with low sample size get shrunk the most, whereas groups with large sample size hardly get shrunk at all. The larger the sample size for a group, the more information we have for that group and the less information we need to **BORROW** from the rest of the population.
+
+```{=tex}
+\begin{align*}
+\textrm{theta.hat}_j\approx E\left( \theta_j| \bar y_j,\mu,\tau^2,\sigma^2\right) = \frac{n_j/\sigma^2}{n_j/\sigma^2+1/\tau^2}  \bar y_j &+ \frac{1/\tau^2}{n_j/\sigma^2+1/\tau^2} \mu\\
+\bar y_j\textrm{ frequentist estimator of } \theta_j &\qquad \mu \textrm{ prior mean of }\theta_j
+\end{align*}
+```
+When $n_j$ is small, i.e. group $j$ gives little info about $\theta_j$, i.e. the frequentist estimate $\bar y_j$ is poor; however the Bayesian estimate: $$E( \theta_j| \ldots)\approx \mu $$ The Bayesian estimate is obtained borrowing strength from the other groups (through $\mu$)
+
+When $\tau^2$ is large (heterogeneous groups), the Bayesian estimate: $$E( \theta_j| \ldots)\approx \bar y_j$$
+
+there is less shrinkage to $\mu$, relying more on the info in group $j$.
+
+## Comparing schools
+
+Let us plot the posterior CIs for each $\theta_j$, the group-specific parameters
+
+```{r}
+# Plot - posterior CIs 90%
+plot(1:100,theta.hat, cex=0.5,main="90% credible intervals",xlim=c(1,100),ylim=c(35,70),xlab='school',ylab='')
+for (i in 1:100) {
+probint=quantile(THETA[,i], c(0.05, 0.95))
+lines(i * c(1, 1), probint)
+}
+```
+
+-   min of `theta.hat` is **SCHOOL 5**
+
+```{r}
+cat(paste("Worst school:", which.min(theta.hat)))
+```
+
+-   max of `theta.hat` is **SCHOOL 51**
+
+```{r}
+#which(theta.hat==min(theta.hat)); which(theta.hat==max(theta.hat))
+cat(paste("Best school:", which.max(theta.hat)))
+```
+
+For each couple $(\theta_j, \theta_l)$, we compute the posterior probability that $\theta_j >\theta_l$, that is the **posterior prob that school** $j$ is BETTER than school $l$. Variable `better` store the matrix of these posterior probabilities
+
+```{r}
+compare.rates <- function(x) {
+  nc <- 100
+  ij <- as.matrix(expand.grid(1:nc, 1:nc))
+  m <- as.matrix(x[,ij[,1]] > x[,ij[,2]]) 
+  matrix(colMeans(m), nc, nc, byrow = TRUE)
+}
+better=compare.rates(THETA)
+better
+```
+
+### Some inference on SCHOOL 5
+
+Posterior probability that **SCHOOL 5** is better than all the other schools:
+
+```{r}
+# Plot - post probs of school 5 being better than other schools
+plot(better[,5])
+```
+
+```{r}
+# Post. probs of school 5 being better that other schools
+cat(better[,5])
+# Min value
+cat(paste("Min value:", min(better[-5,5])))
+# Max Value
+cat(paste("Max Value:", max(better[-5,5])))
+```
+
+All are $\leq 0.37$.
+
+```{r}
+# Post. prob. that school 5 is better than school 51
+cat(paste("P(School 5 better than School 51 | data):", better[51,5]))
+```
+
+### Some inference on SCHOOL 51
+
+Posterior probability that **SCHOOL 51** is better than all the other schools:
+
+```{r}
+# Plot - post probs of school 51 being better than other schools
+plot(better[,51])
+```
+
+```{r}
+# Post. probs of school 51 being better that other schools
+cat(better[,51])
+# Min value
+cat(paste("Min value:", min(better[-51,51])))
+# Max Value
+cat(paste("Max Value:", max(better[-51,51])))
+```
+
+All are $\geq 0.8398$ and $\leq 1$
+
+```{r}
+# Post. prob. that school 51 is better than school 5
+cat(paste("P(School 51 better than School 5 | data):", better[5,51]))
+```
+
+### Inference on SCHOOL 46
+
+We provide the same inference also for **SCHOOL 46**:
+
+```{r}
+# Plot - post probs of school 46 being better than other schools
+plot(better[,46])
+```
+
+```{r}
+# Post. probs of school 46 being better that other schools
+cat(better[,46])
+# Min value
+cat(paste("Min value:", min(better[-46,46])))
+# Max Value
+cat(paste("Max Value:", max(better[-46,46])))
+```
+
+**NOTE**\
+According to the group sample averages, **SCHOOL 46** is better that **SCHOOL 82**:
+
+```{r}
+#  sample averages of schools 46 and 82
+cat(paste("sample averages of school 46 and 82:", ybar[c(46,82)]))
+```
+
+but we are not considering uncertainty of the estimates; in fact the posterior probability that **SCHOOL 46** is better than **SCHOOL 82** is
+
+```{r}
+# Post. prob. that school 46 is better than school 82
+cat(paste("P(School 46 better than 82 | data):", better[82,46]))
+```
